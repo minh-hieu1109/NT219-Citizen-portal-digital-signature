@@ -1,0 +1,53 @@
+[ ca ]
+default_ca = CA_default
+
+[ CA_default ]
+dir               = C:/pki-lab
+certs             = $dir/certs
+crl_dir           = $dir/crl
+new_certs_dir     = $dir/newcerts
+database          = $dir/index.txt
+serial            = $dir/serial
+private_key       = $dir/private/rootCA.key
+certificate       = $dir/certs/rootCA.crt
+default_md        = sha256
+policy            = policy_loose
+x509_extensions   = usr_cert
+copy_extensions   = copy
+
+[ policy_loose ]
+countryName             = optional
+stateOrProvinceName     = optional
+localityName            = optional
+organizationName        = optional
+organizationalUnitName  = optional
+commonName              = supplied
+emailAddress            = optional
+
+[ req ]
+default_bits        = 2048
+prompt              = no
+default_md          = sha256
+distinguished_name  = req_distinguished_name
+
+[ req_distinguished_name ]
+C  = VN
+ST = HCM
+L  = HCM
+O  = Lab Digital Signature
+OU = Root CA
+CN = Lab Root CA
+
+[ v3_ca ]
+subjectKeyIdentifier=hash
+authorityKeyIdentifier=keyid:always,issuer
+basicConstraints = critical, CA:true
+keyUsage = critical, keyCertSign, cRLSign
+
+[ usr_cert ]
+basicConstraints = CA:false
+nsCertType = client, email
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid,issuer
+keyUsage = critical, digitalSignature
+extendedKeyUsage = clientAuth, emailProtection

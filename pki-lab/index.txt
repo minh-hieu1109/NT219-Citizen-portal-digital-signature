@@ -1,0 +1,3 @@
+V	280712102800Z		1000	unknown	/C=VN/ST=HCM/L=HCM/O=Lab Digital Signature/OU=Signer/CN=Portal Signer
+R	280712162117Z	260410055520Z	0894C1852563217D26A648EFAC5C88CEA2AFA7D7	unknown	/C=VN/ST=HCM/L=HCM/O=Citizen Portal/OU=Citizen/CN=citi3/emailAddress=citizen3@example.com
+R	280713061344Z	260410061600Z	6C16F071D37D45682E6D99E957F8E3E781DC8929	unknown	/C=VN/ST=HCM/L=HCM/O=Citizen Portal/OU=Citizen/CN=citi5/emailAddress=citizen5@example.com

@@ -1,0 +1,37 @@
+services:
+  db:
+    image: postgres:17
+    container_name: citizen_portal_db
+    environment:
+      POSTGRES_DB: citizen_db
+      POSTGRES_USER: citizen_user
+      POSTGRES_PASSWORD: 12345678
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  web:
+    build: .
+    container_name: citizen_portal_web
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - .:/app
+      - softhsm_tokens:/var/lib/softhsm/tokens
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+    environment:
+      DEBUG: "True"
+      SECRET_KEY: django-insecure-change-this-key
+      DB_NAME: citizen_db
+      DB_USER: citizen_user
+      DB_PASSWORD: 12345678
+      DB_HOST: db
+      DB_PORT: 5432
+      SOFTHSM2_CONF: /app/softhsm2.conf
+
+volumes:
+  postgres_data:
+  softhsm_tokens:

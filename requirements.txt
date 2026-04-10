@@ -1,0 +1,8 @@
+Django
+djangorestframework
+python-dotenv
+psycopg[binary]
+cryptography
+python-pkcs11
+python-pkcs11
+asn1crypto
