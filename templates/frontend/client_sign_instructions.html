@@ -1,0 +1,28 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="page-header">
+    <h2>Client Signing Instructions</h2>
+    <p>Use the local client signing script to complete this request.</p>
+</div>
+
+<div class="card">
+    <p><strong>Request ID:</strong> {{ signing_request.id }}</p>
+    <p><strong>Document:</strong> {{ signing_request.document.title }}</p>
+    <p><strong>Signing type:</strong> {{ signing_request.get_signing_type_display }}</p>
+    <p><strong>Status:</strong> {{ signing_request.get_status_display }}</p>
+</div>
+
+<div class="card">
+    <h3>Steps</h3>
+    <ol>
+        <li>Generate or use existing local key and certificate via script.</li>
+        <li>Run <code>python tools/client_file_sign_app.py</code> after cấu hình email/password và request id.</li>
+        <li>Nếu cần, mở <code>tools/client_enroll_file.py</code> để đăng ký certificate.</li>
+    </ol>
+</div>
+
+<div class="actions">
+    <a class="button" href="{% url 'signing-request-list' %}">Back to signing requests</a>
+</div>
+{% endblock %}

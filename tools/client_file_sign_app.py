@@ -1,22 +1,37 @@
 import base64
 import json
+import os
 from pathlib import Path
 
+from dotenv import load_dotenv
 import requests
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa, utils
 from cryptography.x509.oid import NameOID
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / '.env')
 
-BASE_URL = "http://127.0.0.1:8000"
-EMAIL = "citizen6@example.com"
-PASSWORD = "Mhiu@123"
+BASE_URL = os.getenv('PORTAL_BASE_URL', 'http://127.0.0.1:8000')
+EMAIL = os.getenv('TOOL_EMAIL', 'citizen6@example.com')
+PASSWORD = os.getenv('TOOL_PASSWORD', 'Mhiu@123')
 
-KEY_DIR = Path(r"C:\Users\LENOVO\Desktop\mmh\citizen-portal\keys")
-PRIVATE_KEY_PATH = KEY_DIR / "client_private_key.pem"
-CSR_PATH = KEY_DIR / "client_request.csr"
-CERT_PATH = KEY_DIR / "client_certificate.pem"
+key_dir_value = os.getenv('CLIENT_KEY_DIR', str(BASE_DIR / 'keys'))
+KEY_DIR = Path(key_dir_value)
+if not KEY_DIR.is_absolute():
+    KEY_DIR = (BASE_DIR / KEY_DIR).resolve()
+PRIVATE_KEY_PATH = KEY_DIR / os.getenv('CLIENT_PRIVATE_KEY_FILENAME', 'client_private_key.pem')
+CSR_PATH = KEY_DIR / os.getenv('CLIENT_CSR_FILENAME', 'client_request.csr')
+CERT_PATH = KEY_DIR / os.getenv('CLIENT_CERT_FILENAME', 'client_certificate.pem')
+
+CSR_COUNTRY = os.getenv('CLIENT_CSR_COUNTRY', 'VN')
+CSR_STATE = os.getenv('CLIENT_CSR_STATE', 'HCM')
+CSR_LOCALITY = os.getenv('CLIENT_CSR_LOCALITY', 'HCM')
+CSR_ORG = os.getenv('CLIENT_CSR_ORG', 'Citizen Portal')
+CSR_OU = os.getenv('CLIENT_CSR_OU', 'Citizen')
+CSR_COMMON_NAME = os.getenv('CLIENT_CSR_COMMON_NAME', EMAIL)
+CSR_EMAIL = os.getenv('CLIENT_CSR_EMAIL', EMAIL)
 
 
 def ensure_key_dir():
@@ -139,6 +154,8 @@ def prepare_client_sign(signing_request_id: int):
         print("[ERROR] Prepare client sign failed.")
         print("Status code:", resp.status_code)
         print("Response text:", resp.text)
+        if resp.status_code == 400 and 'Signer does not have a certificate' in resp.text:
+            print("-> No certificate found for signer. Run: python tools/client_enroll_file.py")
         raise
 
     data = resp.json()
@@ -210,8 +227,22 @@ def sign_request(signing_request_id: int):
 
 
 if __name__ == "__main__":
-    # Dùng lần đầu để sinh key + CSR + enroll cert:
-    # enroll_only()
+    import sys
 
-    # Sau khi đã có SigningRequest loại client:
-    sign_request(19)
+    if len(sys.argv) == 2 and sys.argv[1] == '--enroll':
+        enroll_only()
+        sys.exit(0)
+
+    if len(sys.argv) != 2:
+        print("Usage: python tools/client_file_sign_app.py <signing_request_id>")
+        print("       python tools/client_file_sign_app.py --enroll")
+        print("Example: python tools/client_file_sign_app.py 3")
+        sys.exit(1)
+
+    try:
+        request_id = int(sys.argv[1])
+    except ValueError:
+        print("Signing request id must be a number.")
+        sys.exit(1)
+
+    sign_request(request_id)

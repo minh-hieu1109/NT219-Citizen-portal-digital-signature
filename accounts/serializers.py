@@ -4,6 +4,7 @@ from rest_framework import serializers
 class EnrollFileClientCertificateSerializer(serializers.Serializer):
     csr_pem = serializers.CharField()
     key_storage_type = serializers.CharField(default="file")
+    private_key_path = serializers.CharField(required=False, allow_blank=True)
 
     def validate_csr_pem(self, value):
         if "BEGIN CERTIFICATE REQUEST" not in value:

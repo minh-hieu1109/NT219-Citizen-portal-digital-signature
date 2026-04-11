@@ -80,8 +80,14 @@ docker compose exec web python manage.py migrate
 5. Tạo superuser
 docker compose exec web python manage.py createsuperuser
 6. Truy cập hệ thống
-App/API: http://127.0.0.1:8000
+App/Web: http://127.0.0.1:8000
 Admin: http://127.0.0.1:8000/admin
+
+## Giao diện web
+- `http://127.0.0.1:8000/documents/` để xem danh sách tài liệu và trạng thái của từng tài liệu.
+- `http://127.0.0.1:8000/signing/requests/` để xem danh sách signing request.
+- Trạng thái tài liệu sẽ chuyển sang `Signed` khi signing request hoàn thành.
+
 Luồng demo cơ bản
 A. Client-side signing
 Upload document
@@ -89,16 +95,17 @@ Tạo SigningRequest với signing_type = client
 Chạy script client:
 python .\tools\client_file_sign_app.py
 Script sẽ:
-lấy hash document từ server
-ký bằng private key local
-gửi chữ ký lại cho server
-Server verify và tạo SignatureRecord
+- lấy hash document từ server
+- ký bằng private key local
+- gửi chữ ký lại cho server
+- server verify và tạo SignatureRecord
 B. Remote signing
 Upload document
 Tạo SigningRequest với signing_type = remote
-Gọi API remote sign
+Thực hiện remote signing từ giao diện web tại `http://127.0.0.1:8000/signing/requests/` hoặc gọi API
 Server dùng key file/SoftHSM để ký
-Server tạo SignatureRecord
+Server tạo SignatureRecord và cập nhật trạng thái document thành Signed
+
 Ghi chú
 Project dùng Docker để chạy SoftHSM và môi trường lab PKI
 Repo này phục vụ mục đích học tập / lab / capstone

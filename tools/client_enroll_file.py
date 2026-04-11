@@ -1,7 +1,9 @@
 from pathlib import Path
 import json
-import requests
+import os
 
+from dotenv import load_dotenv
+import requests
 from cryptography import x509
 from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import hashes, serialization
@@ -11,26 +13,32 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 # =========================
 # CẤU HÌNH
 # =========================
-BASE_DIR = Path(r"C:\Users\LENOVO\Desktop\mmh\citizen-portal\keys")
-KEY_PATH = BASE_DIR / "client_private_key.pem"
-CSR_PATH = BASE_DIR / "client_request.csr"
-CERT_PATH = BASE_DIR / "client_certificate.pem"
+BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / '.env')
 
-BASE_URL = "http://127.0.0.1:8000"
+key_dir_value = os.getenv('CLIENT_KEY_DIR', str(BASE_DIR / 'keys'))
+KEY_DIR = Path(key_dir_value)
+if not KEY_DIR.is_absolute():
+    KEY_DIR = (BASE_DIR / KEY_DIR).resolve()
+KEY_PATH = KEY_DIR / os.getenv('CLIENT_PRIVATE_KEY_FILENAME', 'client_private_key.pem')
+CSR_PATH = KEY_DIR / os.getenv('CLIENT_CSR_FILENAME', 'client_request.csr')
+CERT_PATH = KEY_DIR / os.getenv('CLIENT_CERT_FILENAME', 'client_certificate.pem')
+
+BASE_URL = os.getenv('PORTAL_BASE_URL', 'http://127.0.0.1:8000')
 ENROLL_URL = f"{BASE_URL}/api/accounts/certificates/enroll-file-client/"
 
 # Basic Auth giống Postman
-USERNAME = "citizen6@example.com"
-PASSWORD = "Mhiu@123"
+USERNAME = os.getenv('TOOL_EMAIL', 'citizen6@example.com')
+PASSWORD = os.getenv('TOOL_PASSWORD', 'Mhiu@123')
 
 # Thông tin subject cho CSR
-CSR_COUNTRY = "VN"
-CSR_STATE = "HCM"
-CSR_LOCALITY = "HCM"
-CSR_ORG = "Citizen Portal"
-CSR_OU = "Citizen"
-CSR_COMMON_NAME = "citizen6"
-CSR_EMAIL = "citizen6@example.com"
+CSR_COUNTRY = os.getenv('CLIENT_CSR_COUNTRY', 'VN')
+CSR_STATE = os.getenv('CLIENT_CSR_STATE', 'HCM')
+CSR_LOCALITY = os.getenv('CLIENT_CSR_LOCALITY', 'HCM')
+CSR_ORG = os.getenv('CLIENT_CSR_ORG', 'Citizen Portal')
+CSR_OU = os.getenv('CLIENT_CSR_OU', 'Citizen')
+CSR_COMMON_NAME = os.getenv('CLIENT_CSR_COMMON_NAME', USERNAME)
+CSR_EMAIL = os.getenv('CLIENT_CSR_EMAIL', USERNAME)
 
 
 # =========================
@@ -124,6 +132,7 @@ def enroll_certificate():
     payload = {
         "csr_pem": csr_pem,
         "key_storage_type": "file",
+        "private_key_path": os.getenv("CLIENT_PRIVATE_KEY_PATH", "/app/keys/" + os.getenv('CLIENT_PRIVATE_KEY_FILENAME', 'client_private_key.pem')),
     }
 
     headers = {

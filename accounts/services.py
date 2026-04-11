@@ -5,6 +5,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.x509.oid import NameOID
 from pathlib import Path
+from typing import Optional
 from .models import UserCertificate
 from .pkcs11_utils import create_user_keypair_in_softhsm, load_public_key_from_softhsm
 import subprocess
@@ -102,6 +103,7 @@ def issue_certificate_from_csr_for_user(
     user,
     csr_pem: str,
     key_storage_type: str = UserCertificate.KeyStorageType.FILE,
+    private_key_path: Optional[str] = None,
 ):
     try:
         csr = x509.load_pem_x509_csr(csr_pem.encode("utf-8"))
@@ -156,7 +158,7 @@ def issue_certificate_from_csr_for_user(
             "certificate_subject": cert.subject.rfc4514_string(),
             "certificate_serial": str(cert.serial_number),
             "key_storage_type": key_storage_type,
-            "private_key_path": None,
+            "private_key_path": private_key_path or None,
             "pkcs11_token_label": None,
             "pkcs11_key_label": None,
             "pkcs11_key_id": None,

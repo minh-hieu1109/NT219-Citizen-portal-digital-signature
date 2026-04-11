@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="page-header">
+    <h2>Welcome, {{ request.user.full_name }}</h2>
+    <p>Use the navigation links to upload documents and create signing requests.</p>
+</div>
+
+<div class="grid">
+    <div class="card summary-card">
+        <h3>Documents</h3>
+        <p><strong>{{ request.user.documents.count }}</strong> total documents</p>
+        <p><a href="{% url 'document-list' %}">Manage documents</a></p>
+    </div>
+    <div class="card summary-card">
+        <h3>Signing Requests</h3>
+        <p><strong>{{ request.user.signing_requests.count }}</strong> created</p>
+        <p><a href="{% url 'signing-request-list' %}">View signing requests</a></p>
+    </div>
+</div>
+{% endblock %}

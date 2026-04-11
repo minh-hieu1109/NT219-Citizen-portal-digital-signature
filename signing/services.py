@@ -8,6 +8,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from accounts.models import UserCertificate
+from documents.models import Document
 from .models import SignatureRecord, SigningRequest
 from .signer_backends import get_signer_backend
 
@@ -156,6 +157,9 @@ def remote_sign_signing_request(signing_request: SigningRequest) -> SignatureRec
             update_fields=["timestamp_status", "timestamp_message"]
         )
 
+    document.status = Document.Status.SIGNED
+    document.save(update_fields=["status"])
+
     signing_request.status = SigningRequest.Status.SIGNED
     signing_request.completed_at = signature_record.signed_at
     signing_request.save(update_fields=["status", "completed_at"])
@@ -275,6 +279,9 @@ def complete_client_signing_request(
         signature_record.save(
             update_fields=["timestamp_status", "timestamp_message"]
         )
+
+    document.status = Document.Status.SIGNED
+    document.save(update_fields=["status"])
 
     signing_request.status = SigningRequest.Status.SIGNED
     signing_request.completed_at = signature_record.signed_at

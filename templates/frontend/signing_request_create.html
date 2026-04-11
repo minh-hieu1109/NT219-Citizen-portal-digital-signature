@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="page-header">
+    <h2>Create Signing Request</h2>
+    <p>Select a document and signing type.</p>
+</div>
+
+<div class="card">
+    <form method="post">
+        {% csrf_token %}
+        <div class="form-group">
+            {{ form.document.label_tag }}
+            {{ form.document }}
+            {% if form.document.errors %}
+                <div class="field-error">{{ form.document.errors.0 }}</div>
+            {% endif %}
+        </div>
+        <div class="form-group">
+            {{ form.signing_type.label_tag }}
+            {{ form.signing_type }}
+            {% if form.signing_type.errors %}
+                <div class="field-error">{{ form.signing_type.errors.0 }}</div>
+            {% endif %}
+        </div>
+        <button type="submit" class="button">Create signing request</button>
+    </form>
+</div>
+{% endblock %}

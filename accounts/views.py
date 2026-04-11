@@ -17,6 +17,7 @@ class EnrollFileClientCertificateView(APIView):
                 user=request.user,
                 csr_pem=serializer.validated_data["csr_pem"],
                 key_storage_type=serializer.validated_data["key_storage_type"],
+                private_key_path=serializer.validated_data.get("private_key_path"),
             )
         except ValueError as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
