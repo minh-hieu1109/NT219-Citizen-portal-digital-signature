@@ -104,6 +104,10 @@ def issue_certificate_from_csr_for_user(
     csr_pem: str,
     key_storage_type: str = UserCertificate.KeyStorageType.FILE,
     private_key_path: Optional[str] = None,
+    pkcs11_token_label: Optional[str] = None,
+    pkcs11_key_label: Optional[str] = None,
+    pkcs11_key_id: Optional[str] = None,
+    pkcs11_slot: Optional[str] = None,
 ):
     try:
         csr = x509.load_pem_x509_csr(csr_pem.encode("utf-8"))
@@ -151,21 +155,27 @@ def issue_certificate_from_csr_for_user(
         cert_pem = cert_path.read_text(encoding="utf-8")
         cert = x509.load_pem_x509_certificate(cert_pem.encode("utf-8"))
 
+    cert_subject = cert.subject.rfc4514_string()
+    cert_serial = str(cert.serial_number)
+    issued_by = cert.issuer.rfc4514_string()
+    valid_from = cert.not_valid_before_utc
+    valid_to = cert.not_valid_after_utc
+
     user_cert, created = UserCertificate.objects.update_or_create(
         user=user,
         defaults={
             "certificate_pem": cert_pem,
-            "certificate_subject": cert.subject.rfc4514_string(),
-            "certificate_serial": str(cert.serial_number),
+            "certificate_subject": cert_subject,
+            "certificate_serial": cert_serial,
             "key_storage_type": key_storage_type,
-            "private_key_path": private_key_path or None,
-            "pkcs11_token_label": None,
-            "pkcs11_key_label": None,
-            "pkcs11_key_id": None,
-            "pkcs11_slot": None,
-            "issued_by": cert.issuer.rfc4514_string(),
-            "valid_from": cert.not_valid_before_utc,
-            "valid_to": cert.not_valid_after_utc,
+            "private_key_path": private_key_path if key_storage_type == UserCertificate.KeyStorageType.FILE else None,
+            "pkcs11_token_label": pkcs11_token_label if key_storage_type == UserCertificate.KeyStorageType.SOFTHSM else None,
+            "pkcs11_key_label": pkcs11_key_label if key_storage_type == UserCertificate.KeyStorageType.SOFTHSM else None,
+            "pkcs11_key_id": pkcs11_key_id if key_storage_type == UserCertificate.KeyStorageType.SOFTHSM else None,
+            "pkcs11_slot": pkcs11_slot if key_storage_type == UserCertificate.KeyStorageType.SOFTHSM else None,
+            "issued_by": issued_by,
+            "valid_from": valid_from,
+            "valid_to": valid_to,
             "status": UserCertificate.Status.ACTIVE,
         },
     )
@@ -173,7 +183,7 @@ def issue_certificate_from_csr_for_user(
     return {
         "user_certificate": user_cert,
         "certificate_pem": cert_pem,
-        "certificate_subject": cert.subject.rfc4514_string(),
-        "certificate_serial": str(cert.serial_number),
+        "certificate_subject": cert_subject,
+        "certificate_serial": cert_serial,
         "created": created,
     }

@@ -16,8 +16,12 @@ class EnrollFileClientCertificateView(APIView):
             result = issue_certificate_from_csr_for_user(
                 user=request.user,
                 csr_pem=serializer.validated_data["csr_pem"],
-                key_storage_type=serializer.validated_data["key_storage_type"],
+                key_storage_type=serializer.validated_data.get("key_storage_type", "file"),
                 private_key_path=serializer.validated_data.get("private_key_path"),
+                pkcs11_token_label=serializer.validated_data.get("pkcs11_token_label"),
+                pkcs11_key_label=serializer.validated_data.get("pkcs11_key_label"),
+                pkcs11_key_id=serializer.validated_data.get("pkcs11_key_id"),
+                pkcs11_slot=serializer.validated_data.get("pkcs11_slot"),
             )
         except ValueError as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)

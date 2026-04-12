@@ -31,7 +31,23 @@ services:
       DB_HOST: db
       DB_PORT: 5432
       SOFTHSM2_CONF: /app/softhsm2.conf
+  
+  client-signer:
+    build: .
+    container_name: citizen_portal_client_signer
+    working_dir: /app
+    command: sleep infinity
+    volumes:
+      - .:/app
+      - client_softhsm_tokens:/var/lib/softhsm-client/tokens
+    depends_on:
+      - web
+    environment:
+      SOFTHSM2_CONF: /app/client-pki/softhsm2-client.conf
+      PORTAL_BASE_URL: http://web:8000
+      PKCS11_LIB_PATH: /usr/lib/softhsm/libsofthsm2.so
 
 volumes:
   postgres_data:
   softhsm_tokens:
+  client_softhsm_tokens:

@@ -147,3 +147,5 @@ REST_FRAMEWORK = {
     ],
 }
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+ALLOWED_HOSTS = ["127.0.0.1", "localhost", "web"]
