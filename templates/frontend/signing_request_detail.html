@@ -61,6 +61,20 @@
             {% csrf_token %}
             <button class="button small" type="submit">Run Verification</button>
         </form>
+        <p>
+            <a
+                class="btn btn-secondary"
+                href="{% url 'download-verification-package' signing_request.signature_record.id %}"
+            >
+                Download Verification Package
+            </a>
+        </p>
+
+        <p>
+            <a href="{% url 'public-verify-upload' %}">
+                Open Public Verify Page
+            </a>
+        </p>
     {% else %}
         <p>Signature record is not available yet.</p>
     {% endif %}

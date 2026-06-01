@@ -71,3 +71,59 @@ class CitizenRegistrationForm(forms.ModelForm):
         if cleaned.get("password") != cleaned.get("confirm_password"):
             self.add_error("confirm_password", "Password confirmation does not match.")
         return cleaned
+
+class PublicVerifyUploadForm(forms.Form):
+    SIGNATURE_FORMAT_CHOICES = [
+        ("cades", "CAdES/CMS detached (.p7s)"),
+        ("raw", "RAW signature + certificate PEM"),
+        ("pades", "PAdES signed PDF"),
+    ]
+
+    signature_format = forms.ChoiceField(
+        choices=SIGNATURE_FORMAT_CHOICES,
+        widget=forms.Select(attrs={"class": "form-control"}),
+    )
+
+    document_file = forms.FileField(
+        label="Original document",
+        widget=forms.FileInput(attrs={"class": "form-control"}),
+    )
+
+    signature_file = forms.FileField(
+        label="Signature file (.p7s / .sig / .txt)",
+        required=False,
+        widget=forms.FileInput(attrs={"class": "form-control"}),
+    )
+
+    certificate_file = forms.FileField(
+        label="Signer certificate PEM/CRT",
+        required=False,
+        widget=forms.FileInput(attrs={"class": "form-control"}),
+        help_text="Required only for RAW signature mode. CAdES usually carries signer certificate inside .p7s.",
+    )
+
+    def clean(self):
+        cleaned = super().clean()
+        signature_format = cleaned.get("signature_format")
+        signature_file = cleaned.get("signature_file")
+        certificate_file = cleaned.get("certificate_file")
+
+        if signature_format == "raw":
+            if not signature_file:
+                self.add_error(
+                    "signature_file",
+                    "Signature file is required for RAW signature verification.",
+                )
+            if not certificate_file:
+                self.add_error(
+                    "certificate_file",
+                    "Certificate file is required for RAW signature verification.",
+                )
+
+        if signature_format == "cades" and not signature_file:
+            self.add_error(
+                "signature_file",
+                "Signature .p7s file is required for CAdES/CMS verification.",
+            )
+
+        return cleaned

@@ -1,0 +1,73 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<h2>Public Signature Verification</h2>
+
+<p>
+    Upload files to verify a digital signature.
+</p>
+
+<div class="card">
+    <h3>Verification modes</h3>
+    <ul>
+        <li>
+            <strong>RAW:</strong>
+            upload original document + <code>signature.sig</code> + signer certificate.
+        </li>
+        <li>
+            <strong>CAdES/CMS:</strong>
+            upload original document + detached signature <code>signature.p7s</code>.
+        </li>
+        <li>
+            <strong>PAdES:</strong>
+            upload only <code>signed_document.pdf</code>.
+        </li>
+    </ul>
+</div>
+
+<form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+
+    <p>
+        <label><strong>Signature format</strong></label><br>
+        {{ form.signature_format }}
+        {{ form.signature_format.errors }}
+    </p>
+
+    <p>
+        <label><strong>Document file / Signed PDF</strong></label><br>
+        {{ form.document_file }}
+        <br>
+        <small>
+            RAW/CAdES: upload original document.
+            PAdES: upload <code>signed_document.pdf</code>.
+        </small>
+        {{ form.document_file.errors }}
+    </p>
+
+    <p>
+        <label><strong>Signature file</strong></label><br>
+        {{ form.signature_file }}
+        <br>
+        <small>
+            RAW: upload <code>signature.sig</code>.
+            CAdES/CMS: upload <code>signature.p7s</code>.
+            PAdES: leave this empty.
+        </small>
+        {{ form.signature_file.errors }}
+    </p>
+
+    <p>
+        <label><strong>Signer certificate</strong></label><br>
+        {{ form.certificate_file }}
+        <br>
+        <small>
+            Required only for RAW mode.
+            CAdES/PAdES usually carries signer certificate inside the signature structure.
+        </small>
+        {{ form.certificate_file.errors }}
+    </p>
+
+    <button class="button" type="submit">Verify</button>
+</form>
+{% endblock %}

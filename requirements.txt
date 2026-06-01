@@ -7,3 +7,5 @@ python-pkcs11
 python-pkcs11
 asn1crypto
 requests
+pyHanko
+pyhanko-cli

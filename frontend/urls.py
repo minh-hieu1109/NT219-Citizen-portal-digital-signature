@@ -15,6 +15,8 @@ from .views import (
     SigningRequestListView,
     VerificationResultListView,
     VerifySignatureView,
+    PublicVerifyUploadView,
+    DownloadVerificationPackageView,
 )
 
 urlpatterns = [
@@ -32,4 +34,6 @@ urlpatterns = [
     path("ra/pending/", RAPendingListView.as_view(), name="ra-pending"),
     path("ra/<int:user_id>/<str:action>/", RAActionView.as_view(), name="ra-action"),
     path("audit/", AuditLogListView.as_view(), name="audit-log-list"),
+    path("verify/upload/", PublicVerifyUploadView.as_view(), name="public-verify-upload"),
+    path("signatures/<int:pk>/download-package/", DownloadVerificationPackageView.as_view(), name="download-verification-package"),
 ]

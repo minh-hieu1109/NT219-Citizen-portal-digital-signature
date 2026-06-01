@@ -19,7 +19,7 @@ services:
       - .:/app
       - softhsm_tokens:/var/lib/softhsm/tokens
     ports:
-      - "8000:8000"
+      - "8010:8000"
     depends_on:
       - db
     environment:

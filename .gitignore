@@ -7,3 +7,17 @@ task/
 experiments/results/*
 !experiments/results/.gitkeep
 !experiments/results/README.md
+
+media/
+*.zip
+
+pki-lab/certs/rootCA.srl
+pki-lab/tsa/tsaserial
+pki-lab/certs/users/user_*.crt
+pki-lab/certs/users/user_*.csr
+pki-lab/certs/users/user_*.key
+pki-lab/users/private/user_*_key.pem
+
+experiments/results/keys/*_nopass.pem
+experiments/results/cms/
+experiments/results/pades/
