@@ -1,112 +1,119 @@
-# Citizen Services Portal - Digital Signature Capstone
+# Digital Signature for Public Administrative Services via Citizen Services Portal
 
-Đồ án môn NT219 - Cryptography
+## Project Overview
+- Django Citizen Portal for public administrative service workflows.
+- Citizens upload documents and create signing requests.
+- Officer/Admin handles RA identity verification and remote signing.
+- System verifies signature/hash/certificate/timestamp/OCSP/CRL/LTV.
+- Audit logs provide traceability and support non-repudiation.
 
-## Mô tả
-Hệ thống Citizen Services Portal tích hợp chữ ký số, gồm:
+## Problem and Motivation
+- Public-service digitization needs integrity, authenticity, and non-repudiation.
+- Digital signatures reduce paper processing and improve legal assurance.
 
-- Upload document
-- Tạo signing request
+## Main Features
+- Citizen Portal web UI
+- Citizen registration
+- RA identity verification
+- Certificate issuing
+- Document upload + SHA-256 hash
+- Signing request workflow
 - Remote signing
-- Client-side signing
-- Verification
-- CRL checking
-- RFC 3161 timestamping
-- SoftHSM lab qua Docker
+- Replay protection (`nonce`, `expires_at`, `used_at`)
+- Signature verification
+- RFC3161 timestamping
+- OCSP/CRL checking with fail-safe handling
+- LTV evidence archive
+- Audit logs
+- CMS/PKCS#7 detached signature demo
+- PKCS#11/SoftHSM client-signing tool and setup scripts
+- Experiment scripts and benchmark
 
-## Công nghệ chính
-- Django + Django REST Framework
+## Roles
+- Citizen: register, upload document, create signing request, view own result.
+- Officer: process assigned requests, remote sign when active certificate exists.
+- Admin/RA: identity verification, certificate issuing, audit/admin visibility.
+
+## Final Web Workflow
+1. Citizen registers.
+2. Admin/Officer verifies identity in RA panel.
+3. Citizen uploads document.
+4. Citizen creates signing request for officer.
+5. Officer remote signs.
+6. System verifies signature.
+7. LTV evidence and audit logs are stored.
+
+## Architecture Overview
+- Django + Django templates
 - PostgreSQL
-- Docker / Docker Compose
-- OpenSSL
-- SoftHSM2
-- OpenSC (chưa dùng)
-
-## Cấu trúc thư mục chính
-
-- `accounts/`: quản lý user và certificate profile
-- `documents/`: upload và quản lý document
-- `signing/`: signing request, remote sign, client sign
-- `verification/`: verify signature, CRL, timestamp
-- `audit/`: audit log
-- `tools/`: script client-side signing
-- `pki-lab/`: PKI lab files
-- `keys/`: key/certificate local phục vụ demo
-
-## Yêu cầu trước khi chạy
-Cần cài:
-
-- Docker
 - Docker Compose
+- PKI lab files
+- OpenSSL helpers for CMS/TSA/OCSP
+- SoftHSM/PKCS#11 support
+- Main apps: `accounts`, `documents`, `signing`, `verification`, `audit`, `frontend`
 
-## Cách chạy project
+## Security Features Mapping
+| Requirement/Concern | Implemented Feature |
+|---|---|
+| Identity proofing | RA workflow (verify/reject/issue certificate) |
+| Non-repudiation | Certificate-backed signature + audit log |
+| Integrity | SHA-256 hashing + signature verification |
+| Replay attack | `nonce` + `expires_at` + `used_at` |
+| Revocation | OCSP/CRL status handling |
+| Long-term validation | `ValidationEvidence` archive |
+| Standard signature format | CMS/PKCS#7 detached signature demo |
+| Client-side token signing | PKCS#11 tool with safe-warning mode |
 
-### 1. Clone repo
+## Experiments
+- `01_end_to_end_remote_sign.py`: remote-sign E2E baseline.
+- `02_end_to_end_client_pkcs11_sign.py`: client PKCS#11 signing (or warning if env missing).
+- `03_tamper_document_after_sign.py`: tamper/integrity failure detection.
+- `04_revoke_certificate_and_verify.py`: revoked-certificate scenario.
+- `05_replay_remote_signing_request.py`: replay rejection.
+- `06_tsa_unavailable.py`: timestamp service unavailable handling.
+- `07_ocsp_unavailable.py`: OCSP unavailable fail-safe behavior.
+- `08_benchmark_sign_verify.py`: benchmark + CSV/JSON outputs.
+- `09_cms_pkcs7_detached_signature.py`: CMS detached create/verify.
+
+## Quick Start
 ```bash
-git clone <YOUR_GITHUB_REPO_URL>
-cd citizen-portal
-2. Tạo file .env
-
-Tạo file .env ở thư mục gốc.
-
-Ví dụ:
-
-DEBUG=True
-SECRET_KEY=django-insecure-change-this-key
-
-DB_NAME=citizen_db
-DB_USER=citizen_user
-DB_PASSWORD=12345678
-DB_HOST=db
-DB_PORT=5432
-
-PKCS11_LIB_PATH=/usr/lib/softhsm/libsofthsm2.so
-PKCS11_TOKEN_PIN=1234
-
-PKI_OPENSSL_BIN=/usr/bin/openssl
-PKI_ROOT_CA_CERT=/app/pki-lab/root-ca/rootCA.crt
-PKI_ROOT_CA_KEY=/app/pki-lab/root-ca/rootCA.key
-PKI_TSA_CONF=/app/pki-lab/tsa/tsa.conf
-PKI_TSA_SECTION=tsa_config
-PKI_TSA_CERT=/app/pki-lab/tsa/certs/tsa.crt
-PKI_USER_CERT_DIR=/app/pki-lab/user-certs
-3. Build và chạy Docker
-docker compose up --build
-4. Chạy migrate
-
-Mở terminal mới:
-
+docker compose up -d --build
 docker compose exec web python manage.py migrate
-5. Tạo superuser
-docker compose exec web python manage.py createsuperuser
-6. Truy cập hệ thống
-App/Web: http://127.0.0.1:8000
-Admin: http://127.0.0.1:8000/admin
+docker compose exec web python manage.py create_web_demo_data
+```
+Open: `http://localhost:8000`
 
-## Giao diện web
-- `http://127.0.0.1:8000/documents/` để xem danh sách tài liệu và trạng thái của từng tài liệu.
-- `http://127.0.0.1:8000/signing/requests/` để xem danh sách signing request.
-- Trạng thái tài liệu sẽ chuyển sang `Signed` khi signing request hoàn thành.
+## Demo Credentials
+- `admin@example.com / Admin@123456`
+- `officer@example.com / Officer@123456`
+- `citizen@example.com / Citizen@123456`
 
-Luồng demo cơ bản
-A. Client-side signing
-Upload document
-Tạo SigningRequest với signing_type = client
-Chạy script client:
-python .\tools\client_file_sign_app.py
-Script sẽ:
-- lấy hash document từ server
-- ký bằng private key local
-- gửi chữ ký lại cho server
-- server verify và tạo SignatureRecord
-B. Remote signing
-Upload document
-Tạo SigningRequest với signing_type = remote
-Thực hiện remote signing từ giao diện web tại `http://127.0.0.1:8000/signing/requests/` hoặc gọi API
-Server dùng key file/SoftHSM để ký
-Server tạo SignatureRecord và cập nhật trạng thái document thành Signed
+## Tests
+```bash
+docker compose exec web python manage.py check
+docker compose exec web python manage.py makemigrations --check --dry-run
+docker compose exec web python manage.py test
+docker compose exec web python manage.py web_smoke_check
+```
 
-Ghi chú
-Project dùng Docker để chạy SoftHSM và môi trường lab PKI
-Repo này phục vụ mục đích học tập / lab / capstone
-Không dùng khóa / certificate trong repo cho môi trường production
+## Limitations
+- Lab/demo implementation, not production-ready.
+- OCSP responder may be unavailable unless started separately; system records unavailable safely.
+- CMS demo currently uses file-based key, not SoftHSM-backed CMS signing.
+- Live PKCS#11 client signing depends on local SoftHSM/token/env setup.
+- Legal/QES compliance is discussed at design level, not certified production compliance.
+
+## Repository Structure
+```text
+accounts/      user, roles, RA, certificate profile, demo data commands
+documents/     document model/upload/hash logic
+signing/       signing request, remote/client signing, replay protection, CMS service
+verification/  signature verification, OCSP/CRL/TSA/LTV services
+audit/         audit log model/API/helpers
+frontend/      web UI views/forms/tests/management commands
+experiments/   end-to-end experiments and benchmark scripts
+tools/         client-side helper tools (PKCS#11/file signing)
+scripts/       setup/start helper scripts (SoftHSM, OCSP)
+pki-lab/       lab CA, cert, key, CRL, TSA materials
+task/          implementation progress tracking
+```

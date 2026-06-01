@@ -1,0 +1,32 @@
+﻿{% extends 'base.html' %}
+
+{% block content %}
+<div class="page-header"><h2>Audit Logs</h2></div>
+
+{% if audit_logs %}
+<table class="table">
+    <thead>
+        <tr>
+            <th>Time</th>
+            <th>User</th>
+            <th>Action</th>
+            <th>Object</th>
+            <th>Detail</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for log in audit_logs %}
+        <tr>
+            <td>{{ log.created_at|date:'Y-m-d H:i:s' }}</td>
+            <td>{{ log.user.email|default:'-' }}</td>
+            <td>{{ log.action }}</td>
+            <td>{{ log.object_type }}#{{ log.object_id }}</td>
+            <td><pre class="json-pre">{{ log.detail }}</pre></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No audit logs available.</p>
+{% endif %}
+{% endblock %}

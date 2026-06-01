@@ -1,21 +1,50 @@
-{% extends 'base.html' %}
+﻿{% extends 'base.html' %}
 
 {% block content %}
 <div class="page-header">
-    <h2>Welcome, {{ request.user.full_name }}</h2>
-    <p>Use the navigation links to upload documents and create signing requests.</p>
+    <h2>Demo Dashboard</h2>
+</div>
+
+{% if user.is_authenticated %}
+<div class="card">
+    <p><strong>User:</strong> {{ user.email }}</p>
+    <p><strong>Role:</strong> {{ user.role }}</p>
 </div>
 
 <div class="grid">
-    <div class="card summary-card">
-        <h3>Documents</h3>
-        <p><strong>{{ request.user.documents.count }}</strong> total documents</p>
-        <p><a href="{% url 'document-list' %}">Manage documents</a></p>
-    </div>
-    <div class="card summary-card">
-        <h3>Signing Requests</h3>
-        <p><strong>{{ request.user.signing_requests.count }}</strong> created</p>
-        <p><a href="{% url 'signing-request-list' %}">View signing requests</a></p>
-    </div>
+    <div class="card summary-card"><h3>Documents</h3><p>{{ counts.documents }}</p></div>
+    <div class="card summary-card"><h3>Signing Requests</h3><p>{{ counts.signing_requests }}</p></div>
+    <div class="card summary-card"><h3>Signatures</h3><p>{{ counts.signatures }}</p></div>
+    <div class="card summary-card"><h3>Verification</h3><p>{{ counts.verification_results }}</p></div>
+    <div class="card summary-card"><h3>LTV Evidence</h3><p>{{ counts.validation_evidence }}</p></div>
+    <div class="card summary-card"><h3>Audit Logs</h3><p>{{ counts.audit_logs }}</p></div>
 </div>
+
+<div class="card">
+    <h3>Quick Links</h3>
+    <div class="link-list">
+        <a href="{% url 'document-list' %}">Documents</a>
+        <a href="{% url 'document-upload' %}">Upload document</a>
+        <a href="{% url 'signing-request-list' %}">Signing requests</a>
+        <a href="{% url 'signing-request-create' %}">Create signing request</a>
+        <a href="{% url 'verification-result-list' %}">Verification results</a>
+        {% if is_officer_admin %}
+            <a href="{% url 'ra-pending' %}">RA panel (pending: {{ pending_identity_count|default:0 }})</a>
+            <a href="{% url 'audit-log-list' %}">Audit logs</a>
+        {% endif %}
+        <a href="/admin/">Admin site</a>
+    </div>
+    <p class="muted">Docs: <code>README_DEMO.md</code> and <code>docs/demo_checklist.md</code></p>
+</div>
+{% else %}
+<div class="card">
+    <p>You are not logged in. Please <a href="{% url 'login' %}">login</a> to use the dashboard.</p>
+    {% if not user_exists %}
+        <p>No users found yet. Run:</p>
+        <pre>docker compose exec web python manage.py create_demo_users
+
+docker compose exec web python manage.py createsuperuser</pre>
+    {% endif %}
+</div>
+{% endif %}
 {% endblock %}

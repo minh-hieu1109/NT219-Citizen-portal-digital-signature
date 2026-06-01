@@ -2,9 +2,11 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
+from frontend.views import CitizenRegisterView
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("accounts/register/", CitizenRegisterView.as_view(), name="register"),
     path("accounts/", include("django.contrib.auth.urls")),
     path("api/accounts/", include("accounts.urls")),
     path("api/documents/", include("documents.urls")),

@@ -1,37 +1,40 @@
-{% extends 'base.html' %}
+﻿{% extends 'base.html' %}
 
 {% block content %}
 <div class="page-header">
     <h2>Documents</h2>
-    <p>Upload a new document and view your uploaded files.</p>
 </div>
 
 <div class="actions">
-    <a class="button" href="{% url 'document-upload' %}">Upload a document</a>
+    <a class="button" href="{% url 'document-upload' %}">Upload document</a>
 </div>
 
 {% if documents %}
 <table class="table">
     <thead>
         <tr>
+            <th>ID</th>
             <th>Title</th>
+            <th>Owner</th>
             <th>Status</th>
-            <th>Uploaded</th>
-            <th>SHA256</th>
+            <th>SHA-256</th>
+            <th>Created</th>
         </tr>
     </thead>
     <tbody>
         {% for document in documents %}
         <tr>
-            <td>{{ document.title }}</td>
+            <td>{{ document.id }}</td>
+            <td><a href="{% url 'document-detail' document.id %}">{{ document.title }}</a></td>
+            <td>{{ document.owner.email }}</td>
             <td>{{ document.get_status_display }}</td>
+            <td class="mono">{{ document.sha256_hash|default:'-' }}</td>
             <td>{{ document.uploaded_at|date:'Y-m-d H:i' }}</td>
-            <td>{{ document.sha256_hash }}</td>
         </tr>
         {% endfor %}
     </tbody>
 </table>
 {% else %}
-<p>No documents uploaded yet.</p>
+<p>No documents available.</p>
 {% endif %}
 {% endblock %}

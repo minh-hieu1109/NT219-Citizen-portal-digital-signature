@@ -1,4 +1,4 @@
-﻿.PHONY: up down logs check migrate test demo-remote demo-client-pkcs11 demo-tamper demo-revoke demo-replay demo-ocsp-unavailable demo-cms benchmark
+﻿.PHONY: up down logs check migrate test create-demo-users web-smoke demo-remote demo-client-pkcs11 demo-tamper demo-revoke demo-replay demo-ocsp-unavailable demo-cms benchmark
 
 up:
 	docker compose up -d --build
@@ -20,6 +20,12 @@ migrate:
 
 test:
 	docker compose exec web python manage.py test
+
+create-demo-users:
+	docker compose exec web python manage.py create_demo_users
+
+web-smoke:
+	docker compose exec web python manage.py web_smoke_check
 
 demo-remote:
 	docker compose exec web python experiments/01_end_to_end_remote_sign.py

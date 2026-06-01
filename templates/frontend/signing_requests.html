@@ -1,13 +1,12 @@
-{% extends 'base.html' %}
+﻿{% extends 'base.html' %}
 
 {% block content %}
 <div class="page-header">
     <h2>Signing Requests</h2>
-    <p>Review signing requests and start remote or client-side signing steps.</p>
 </div>
 
 <div class="actions">
-    <a class="button" href="{% url 'signing-request-create' %}">New signing request</a>
+    <a class="button" href="{% url 'signing-request-create' %}">Create signing request</a>
 </div>
 
 {% if signing_requests %}
@@ -16,36 +15,34 @@
         <tr>
             <th>ID</th>
             <th>Document</th>
+            <th>Requester</th>
+            <th>Signer</th>
             <th>Type</th>
             <th>Status</th>
-            <th>Created</th>
-            <th>Actions</th>
+            <th>Nonce</th>
+            <th>Expires</th>
+            <th>Used At</th>
+            <th>Strong Auth</th>
         </tr>
     </thead>
     <tbody>
         {% for request in signing_requests %}
         <tr>
-            <td>{{ request.id }}</td>
+            <td><a href="{% url 'signing-request-detail' request.id %}">#{{ request.id }}</a></td>
             <td>{{ request.document.title }}</td>
+            <td>{{ request.requested_by.email }}</td>
+            <td>{{ request.signer.email }}</td>
             <td>{{ request.get_signing_type_display }}</td>
             <td>{{ request.get_status_display }}</td>
-            <td>{{ request.created_at|date:'Y-m-d H:i' }}</td>
-            <td>
-                {% if request.signing_type == 'remote' and request.status == 'pending' %}
-                    <form method="post" action="{% url 'remote-sign' request.id %}" style="display:inline-block;">
-                        {% csrf_token %}
-                        <button type="submit" class="button small">Remote sign</button>
-                    </form>
-                {% endif %}
-                {% if request.signing_type == 'client' and request.status == 'pending' %}
-                    <a class="button small" href="{% url 'client-sign-instructions' request.id %}">Client sign</a>
-                {% endif %}
-            </td>
+            <td class="mono">{{ request.nonce }}</td>
+            <td>{{ request.expires_at|date:'Y-m-d H:i:s' }}</td>
+            <td>{{ request.used_at|date:'Y-m-d H:i:s'|default:'-' }}</td>
+            <td>{{ request.strong_auth_verified }}</td>
         </tr>
         {% endfor %}
     </tbody>
 </table>
 {% else %}
-<p>No signing requests created yet.</p>
+<p>No signing requests found.</p>
 {% endif %}
 {% endblock %}

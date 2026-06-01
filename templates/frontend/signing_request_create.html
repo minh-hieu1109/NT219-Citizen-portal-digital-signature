@@ -7,6 +7,14 @@
 </div>
 
 <div class="card">
+    {% if eligible_signer_count == 0 %}
+    <div class="message error">
+        No eligible signer found. Please verify identity and issue certificate in RA panel first.
+        {% if is_officer_admin %}
+        <a href="{% url 'ra-pending' %}">Go to RA panel</a>
+        {% endif %}
+    </div>
+    {% endif %}
     <form method="post">
         {% csrf_token %}
         <div class="form-group">
@@ -23,7 +31,14 @@
                 <div class="field-error">{{ form.signing_type.errors.0 }}</div>
             {% endif %}
         </div>
-        <button type="submit" class="button">Create signing request</button>
+        <div class="form-group">
+            {{ form.signer.label_tag }}
+            {{ form.signer }}
+            {% if form.signer.errors %}
+                <div class="field-error">{{ form.signer.errors.0 }}</div>
+            {% endif %}
+        </div>
+        <button type="submit" class="button" {% if eligible_signer_count == 0 %}disabled{% endif %}>Create signing request</button>
     </form>
 </div>
 {% endblock %}

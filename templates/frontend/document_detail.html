@@ -1,0 +1,45 @@
+﻿{% extends 'base.html' %}
+
+{% block content %}
+<div class="page-header">
+    <h2>Document #{{ document.id }}</h2>
+</div>
+
+<div class="card">
+    <p><strong>Title:</strong> {{ document.title }}</p>
+    <p><strong>File:</strong> {% if document.file %}<a href="{{ document.file.url }}">{{ document.file.name }}</a>{% else %}-{% endif %}</p>
+    <p><strong>SHA-256:</strong> <span class="mono">{{ document.sha256_hash|default:'-' }}</span></p>
+    <p><strong>Owner:</strong> {{ document.owner.email }}</p>
+    <p><strong>Status:</strong> {{ document.get_status_display }}</p>
+    <p><strong>Created:</strong> {{ document.uploaded_at|date:'Y-m-d H:i:s' }}</p>
+</div>
+
+<div class="card">
+    <h3>Related Signatures</h3>
+    {% if signature_records %}
+    <table class="table">
+        <thead><tr><th>ID</th><th>Request</th><th>Signed At</th><th>Algorithm</th><th>Verify</th></tr></thead>
+        <tbody>
+        {% for sig in signature_records %}
+        <tr>
+            <td>{{ sig.id }}</td>
+            <td><a href="{% url 'signing-request-detail' sig.signing_request.id %}">#{{ sig.signing_request.id }}</a></td>
+            <td>{{ sig.signed_at|date:'Y-m-d H:i:s' }}</td>
+            <td>{{ sig.algorithm }}</td>
+            <td>
+                <form method="post" action="{% url 'verify-signature' sig.id %}">
+                    {% csrf_token %}
+                    <button class="button small" type="submit">Verify</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>No signatures yet.</p>
+    {% endif %}
+</div>
+
+<div class="actions"><a class="button" href="{% url 'document-list' %}">Back</a></div>
+{% endblock %}

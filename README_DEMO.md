@@ -1,114 +1,139 @@
-﻿# README_DEMO
+# README_DEMO
 
-## 1) Run with Docker
+## 1. Prerequisites
+- Docker Desktop
+- Git
+- Browser
+- Optional for advanced demos: SoftHSM/OpenSC/OpenSSL
 
+## 2. Clone and Start
 ```bash
+git clone <repo-url>
+cd NT219-Citizen-portal-digital-signature
 docker compose up -d --build
 docker compose ps
-docker compose logs web --tail=100
 ```
 
-## 2) Apply migrations
-
+## 3. Apply Migrations
 ```bash
 docker compose exec web python manage.py migrate
 ```
 
-## 3) Create superuser (optional)
-
+## 4. Create Deterministic Demo Data
 ```bash
-docker compose exec web python manage.py createsuperuser
+docker compose exec web python manage.py create_web_demo_data
 ```
+Expected:
+- `admin/officer/citizen` accounts created/updated.
+- officer has an active certificate.
+- citizen has demo document.
+- one pending remote signing request exists.
 
-## 4) Run checks and tests
+## 5. Web URL and Credentials
+- URL: `http://localhost:8000`
+- `admin@example.com / Admin@123456`
+- `officer@example.com / Officer@123456`
+- `citizen@example.com / Citizen@123456`
 
+## 6. Main Web Demo Script
+1. Admin dashboard
+- Login admin and open `/`.
+- Expected: dashboard and counters visible.
+
+2. RA panel
+- Open `/ra/pending/`.
+- Expected sections:
+  - Pending identity verification
+  - Verified users without certificate
+  - Users with active certificate
+- Officer should already have cert for signing.
+
+3. Citizen registration demo (optional)
+- Open `/accounts/register/`.
+- Register a new citizen.
+- Login admin/officer and verify identity in RA panel.
+- Proves RA onboarding workflow.
+
+4. Citizen upload document
+- Login citizen and open `/documents/upload/`.
+- Upload file.
+- Expected: document stored with SHA-256 hash.
+
+5. Citizen creates signing request
+- Open `/signing/requests/create/`.
+- Select document.
+- Select signer `officer@example.com`.
+- Select `signing_type=remote`.
+- Expected: request pending and `expires_at` shown.
+- Default TTL is `REMOTE_SIGNING_REQUEST_TTL_MINUTES=10`.
+
+6. Officer remote signs
+- Login officer.
+- Open `/signing/requests/` and assigned request detail.
+- Click Remote Sign.
+- Expected: request `signed`, `used_at` set, `SignatureRecord` created.
+
+7. Verify
+- Click Verify or open `/verification/results/`.
+- Expected:
+  - status valid
+  - hash match true
+  - signature valid true
+  - timestamp processed
+  - LTV evidence present
+
+8. Audit log
+- Login admin/officer and open `/audit/`.
+- Expected: recent upload/request/sign/verify/RA actions listed first.
+
+9. Logout
+- Click Logout in navbar.
+- Expected: redirected to `/accounts/login/`.
+
+## 7. Terminal Experiments
 ```bash
 docker compose exec web python manage.py check
-docker compose exec web python manage.py makemigrations --check --dry-run
 docker compose exec web python manage.py test
-```
+docker compose exec web python manage.py web_smoke_check
 
-## 5) Run experiments
-
-```bash
 docker compose exec web python experiments/01_end_to_end_remote_sign.py
-docker compose exec web python experiments/02_end_to_end_client_pkcs11_sign.py
 docker compose exec web python experiments/03_tamper_document_after_sign.py
-docker compose exec web python experiments/04_revoke_certificate_and_verify.py
 docker compose exec web python experiments/05_replay_remote_signing_request.py
-docker compose exec web python experiments/06_tsa_unavailable.py
 docker compose exec web python experiments/07_ocsp_unavailable.py
 docker compose exec web python experiments/08_benchmark_sign_verify.py
 docker compose exec web python experiments/09_cms_pkcs7_detached_signature.py
 ```
 
-## 6) Expected warning/fail-safe cases
+## 8. What Each Demo Proves
+- Web flow: citizen portal + RA + remote signing lifecycle.
+- Tamper test: integrity protection.
+- Replay test: `nonce/expires_at/used_at` protection.
+- OCSP unavailable: fail-safe revocation handling.
+- Benchmark: performance/evaluation output.
+- CMS: standards-oriented detached signature support.
 
-- `experiments/02_end_to_end_client_pkcs11_sign.py` can print `[WARNING]` and exit safely when PKCS#11/SoftHSM environment is not ready.
-- `experiments/06_tsa_unavailable.py` intentionally simulates TSA failure; signing should still complete with timestamp status error/missing.
-- `experiments/07_ocsp_unavailable.py` intentionally simulates OCSP endpoint outage; app should not crash.
-- `experiments/04_revoke_certificate_and_verify.py` can depend on PKI/CRL state in environment; invalid/revoked verification is expected behavior in this scenario.
-- `experiments/09_cms_pkcs7_detached_signature.py` can print `[WARNING]` when suitable cert/key/OpenSSL is missing in environment.
+## 9. Troubleshooting
+- No eligible signer found:
+  - Run `create_web_demo_data` or issue cert to officer in RA panel.
+- Signer has no certificate:
+  - Issue cert in RA panel or rerun `create_web_demo_data`.
+- Logout 405:
+  - Should be fixed; use navbar Logout button (POST).
+- OCSP unavailable:
+  - Non-fatal in lab; status stored as unavailable/error.
+- PKCS#11 warning:
+  - Set env vars: `TOOL_EMAIL`, `PKCS11_USER_PIN`, `PKCS11_TOKEN_LABEL`, `PKCS11_KEY_LABEL`, `PKCS11_LIB_PATH`.
+- Docker permission/container conflict:
+  - Restart Docker Desktop, rerun compose up/down as needed.
+  - Do not delete volumes unless intentionally resetting demo data.
 
-## 7) PKCS#11 client-signing demo setup
-
-Run setup scripts first:
-
-- Linux/macOS shell:
-```bash
-bash scripts/setup_client_softhsm_token.sh
-```
-
-- Windows PowerShell:
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/setup_client_softhsm_token.ps1
-```
-
-Then set environment variables (example):
-
-```bash
-export TOOL_EMAIL="your_user_email@example.com"
-export TOOL_PASSWORD="your_password"
-export PKCS11_USER_PIN="123456"
-export PKCS11_TOKEN_LABEL="citizen-client-token"
-export PKCS11_KEY_LABEL="CitizenClientKey"
-export PKCS11_LIB_PATH="/usr/lib/softhsm/libsofthsm2.so"
-```
-
-Run client PKCS#11 experiment:
-
-```bash
-docker compose exec web python experiments/02_end_to_end_client_pkcs11_sign.py
-```
-
-## 8) CMS/PKCS#7 detached signature demo
-
-Run CMS experiment:
-
-```bash
-docker compose exec web python experiments/09_cms_pkcs7_detached_signature.py
-```
-
-Optional direct commands:
-
-```bash
-docker compose exec web python manage.py create_cms_signature --input /app/experiments/results/cms/cms_demo_input.txt --cert /app/pki-lab/certs/users/user_4.crt --key /app/pki-lab/users/private/user_4_key.pem --out /app/experiments/results/cms/cms_demo_signature.p7s --ca /app/pki-lab/certs/rootCA.crt
-
-docker compose exec web python manage.py verify_cms_signature --input /app/experiments/results/cms/cms_demo_input.txt --signature /app/experiments/results/cms/cms_demo_signature.p7s --ca /app/pki-lab/certs/rootCA.crt
-```
-
-Limitation:
-- CMS signing in Phase 7 is implemented with file-based private key via OpenSSL CLI.
-- SoftHSM-backed CMS signing is not integrated yet in this phase.
-
-## 9) Required PKCS#11 environment variables
-
-- `TOOL_EMAIL`
-- `PKCS11_USER_PIN`
-- `PKCS11_TOKEN_LABEL`
-- `PKCS11_KEY_LABEL`
-- `PKCS11_LIB_PATH`
-
-Optional but usually needed in API mode:
-- `TOOL_PASSWORD`
-- `PORTAL_BASE_URL`
+## 10. Final Presentation Checklist
+- Containers are up.
+- `create_web_demo_data` completed.
+- `web_smoke_check` pass.
+- Officer has active certificate.
+- Citizen can create request for officer.
+- Officer can remote sign.
+- Verification is valid.
+- Audit page shows new actions.
+- Key experiments pass.
