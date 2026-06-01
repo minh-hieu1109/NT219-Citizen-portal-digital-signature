@@ -10,7 +10,7 @@ def create_user_certificate(sender, instance, created, **kwargs):
     if not created:
         return
 
-    if instance.role == User.Role.ADMIN:
+    if instance.role != User.Role.ADMIN:
         return
 
     issue_certificate_for_user(instance)

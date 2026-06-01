@@ -109,6 +109,9 @@ def issue_certificate_from_csr_for_user(
     pkcs11_key_id: Optional[str] = None,
     pkcs11_slot: Optional[str] = None,
 ):
+    if user.role == user.Role.CITIZEN and not user.is_verified_identity:
+        raise ValueError("Citizen identity must be verified before certificate issuance.")
+
     try:
         csr = x509.load_pem_x509_csr(csr_pem.encode("utf-8"))
     except Exception as e:

@@ -1,5 +1,6 @@
 from rest_framework import serializers
-from .models import UserCertificate
+
+from .models import User, UserCertificate
 
 class EnrollFileClientCertificateSerializer(serializers.Serializer):
     csr_pem = serializers.CharField()
@@ -28,3 +29,18 @@ class EnrollFileClientCertificateSerializer(serializers.Serializer):
             return attrs
 
         return attrs
+
+
+class PendingIdentityUserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "email",
+            "full_name",
+            "citizen_id",
+            "role",
+            "is_verified_identity",
+            "created_at",
+        ]
+        read_only_fields = fields

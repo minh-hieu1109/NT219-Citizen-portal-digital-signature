@@ -1,6 +1,18 @@
 from django.db import models
 from django.conf import settings
+from django.utils import timezone
+from datetime import timedelta
+import uuid
 from documents.models import Document
+
+
+def default_signing_request_nonce():
+    return uuid.uuid4().hex
+
+
+def default_signing_request_expiry():
+    ttl_minutes = getattr(settings, "REMOTE_SIGNING_REQUEST_TTL_MINUTES", 10)
+    return timezone.now() + timedelta(minutes=ttl_minutes)
 
 
 class SigningRequest(models.Model):
@@ -41,6 +53,10 @@ class SigningRequest(models.Model):
         choices=Status.choices,
         default=Status.PENDING
     )
+    nonce = models.CharField(max_length=64, default=default_signing_request_nonce, db_index=True)
+    expires_at = models.DateTimeField(default=default_signing_request_expiry)
+    used_at = models.DateTimeField(null=True, blank=True)
+    strong_auth_verified = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)
 

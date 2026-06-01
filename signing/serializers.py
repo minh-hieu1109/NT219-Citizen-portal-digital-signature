@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.utils import timezone
 
 from documents.models import Document
 from .models import SigningRequest, SignatureRecord
@@ -28,6 +29,10 @@ class SigningRequestSerializer(serializers.ModelSerializer):
             "signer_email",
             "signing_type",
             "status",
+            "nonce",
+            "expires_at",
+            "used_at",
+            "strong_auth_verified",
             "created_at",
             "completed_at",
         ]
@@ -38,6 +43,10 @@ class SigningRequestSerializer(serializers.ModelSerializer):
             "signer_email",
             "document_title",
             "status",
+            "nonce",
+            "expires_at",
+            "used_at",
+            "strong_auth_verified",
             "created_at",
             "completed_at",
         ]
@@ -137,6 +146,16 @@ class RemoteSignSerializer(serializers.Serializer):
     def validate(self, attrs):
         signing_request = self.context["signing_request"]
         request = self.context["request"]
+
+        if signing_request.expires_at and timezone.now() > signing_request.expires_at:
+            raise serializers.ValidationError(
+                {"detail": "Signing request has expired."}
+            )
+
+        if signing_request.used_at is not None:
+            raise serializers.ValidationError(
+                {"detail": "Signing request has already been used (replay detected)."}
+            )
 
         if signing_request.status != SigningRequest.Status.PENDING:
             raise serializers.ValidationError(

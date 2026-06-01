@@ -11,6 +11,7 @@ from accounts.models import UserCertificate
 from documents.models import Document
 from .models import SignatureRecord, SigningRequest
 from .signer_backends import get_signer_backend
+from verification.ltv_services import archive_validation_evidence
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
@@ -90,11 +91,29 @@ def remote_sign_signing_request(signing_request: SigningRequest) -> SignatureRec
     if signing_request.signing_type != SigningRequest.SigningType.REMOTE:
         raise ValueError("This signing request is not a remote signing request.")
 
+    now = timezone.now()
+    if signing_request.expires_at and now > signing_request.expires_at:
+        raise ValueError("Signing request has expired.")
+
+    if signing_request.used_at is not None:
+        raise ValueError("Signing request has already been used (replay detected).")
+
     if signing_request.status != SigningRequest.Status.PENDING:
         raise ValueError("This signing request is not in pending status.")
 
     if hasattr(signing_request, "signature_record"):
         raise ValueError("This signing request has already been signed.")
+
+    if (
+        settings.REQUIRE_STRONG_AUTH_FOR_REMOTE_SIGNING
+        and not signing_request.strong_auth_verified
+    ):
+        raise ValueError("Strong authentication is required for remote signing.")
+
+    if signer.role == signer.Role.CITIZEN and not signer.is_verified_identity:
+        raise ValueError(
+            "Citizen identity is not verified. Remote signing is not allowed."
+        )
 
     user_cert = UserCertificate.objects.filter(user=signer).first()
     if not user_cert:
@@ -112,7 +131,6 @@ def remote_sign_signing_request(signing_request: SigningRequest) -> SignatureRec
             "Signer certificate is not active. Remote signing is not allowed."
         )
 
-    now = timezone.now()
     if user_cert.valid_from and now < user_cert.valid_from:
         raise ValueError("Signer certificate is not valid yet.")
 
@@ -161,8 +179,15 @@ def remote_sign_signing_request(signing_request: SigningRequest) -> SignatureRec
     document.save(update_fields=["status"])
 
     signing_request.status = SigningRequest.Status.SIGNED
+    signing_request.used_at = timezone.now()
     signing_request.completed_at = signature_record.signed_at
-    signing_request.save(update_fields=["status", "completed_at"])
+    signing_request.save(update_fields=["status", "used_at", "completed_at"])
+
+    try:
+        archive_validation_evidence(signature_record)
+    except Exception:
+        # LTV archiving is best-effort in lab mode; signing result should remain available.
+        pass
 
     return signature_record
 
@@ -286,6 +311,12 @@ def complete_client_signing_request(
     signing_request.status = SigningRequest.Status.SIGNED
     signing_request.completed_at = signature_record.signed_at
     signing_request.save(update_fields=["status", "completed_at"])
+
+    try:
+        archive_validation_evidence(signature_record)
+    except Exception:
+        # LTV archiving is best-effort in lab mode; signing result should remain available.
+        pass
 
     return signature_record
 

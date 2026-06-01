@@ -149,3 +149,15 @@ REST_FRAMEWORK = {
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 ALLOWED_HOSTS = ["127.0.0.1", "localhost", "web"]
+
+REMOTE_SIGNING_REQUEST_TTL_MINUTES = int(
+    os.getenv("REMOTE_SIGNING_REQUEST_TTL_MINUTES", "10")
+)
+REQUIRE_STRONG_AUTH_FOR_REMOTE_SIGNING = os.getenv(
+    "REQUIRE_STRONG_AUTH_FOR_REMOTE_SIGNING",
+    "False",
+) == "True"
+
+ENABLE_OCSP_CHECK = os.getenv("ENABLE_OCSP_CHECK", "True") == "True"
+OCSP_RESPONDER_URL = os.getenv("OCSP_RESPONDER_URL", "http://localhost:8888")
+OPENSSL_BIN = os.getenv("OPENSSL_BIN", "openssl")

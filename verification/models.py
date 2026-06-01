@@ -22,3 +22,22 @@ class VerificationResult(models.Model):
     
     def __str__(self):
         return f"Verification #{self.id} - Signature #{self.signature_record.id} - {self.status}"
+
+
+class ValidationEvidence(models.Model):
+    signature_record = models.OneToOneField(
+        SignatureRecord,
+        on_delete=models.CASCADE,
+        related_name="validation_evidence",
+    )
+    signer_certificate_pem = models.TextField(blank=True)
+    certificate_chain_pem = models.TextField(blank=True)
+    crl_pem = models.TextField(blank=True)
+    ocsp_response_base64 = models.TextField(blank=True)
+    timestamp_token_base64 = models.TextField(blank=True)
+    evidence_hash = models.CharField(max_length=64, blank=True)
+    detail = models.JSONField(default=dict, blank=True)
+    archived_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"ValidationEvidence #{self.id} - Signature #{self.signature_record.id}"

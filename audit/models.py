@@ -8,6 +8,9 @@ class AuditLog(models.Model):
         SIGNING_REQUEST_CREATED = "signing_request_created", "Signing Request Created"
         REMOTE_SIGNED = "remote_signed", "Remote Signed"
         VERIFICATION_RUN = "verification_run", "Verification Run"
+        IDENTITY_VERIFIED = "identity_verified", "Identity Verified"
+        IDENTITY_REJECTED = "identity_rejected", "Identity Rejected"
+        CERTIFICATE_ISSUED = "certificate_issued", "Certificate Issued"
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,

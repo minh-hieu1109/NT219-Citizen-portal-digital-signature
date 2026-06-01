@@ -1,5 +1,9 @@
-venv/
+﻿venv/
 media/
 .env
 __pycache__/
 *.pyc
+task/
+experiments/results/*
+!experiments/results/.gitkeep
+!experiments/results/README.md

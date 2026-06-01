@@ -15,6 +15,8 @@ from accounts.models import UserCertificate
 from signing.models import SignatureRecord
 from .models import VerificationResult
 from .crl_utils import is_cert_revoked_in_crl
+from .ocsp_services import check_certificate_ocsp_status
+from .ltv_services import verify_ltv
 
 
 def verify_timestamp_for_file(file_path: str, timestamp_token_b64: str) -> dict:
@@ -199,6 +201,58 @@ def verify_signature_record(signature_record: SignatureRecord) -> VerificationRe
             },
         )
 
+    ocsp_info = {}
+    if getattr(settings, "ENABLE_OCSP_CHECK", True):
+        with open(settings.PKI_ROOT_CA_CERT, "rb") as f:
+            issuer_pem = f.read().decode("utf-8")
+
+        ocsp_result = check_certificate_ocsp_status(
+            cert_pem=signature_record.certificate_pem,
+            issuer_pem=issuer_pem,
+        )
+        ocsp_status = ocsp_result.get("status", "error")
+        ocsp_info = {
+            "ocsp_enabled": True,
+            "ocsp_status": ocsp_status,
+            "ocsp_message": ocsp_result.get("message", ""),
+            "ocsp_serial": ocsp_result.get("serial", str(cert.serial_number)),
+            "ocsp_responder_url": settings.OCSP_RESPONDER_URL,
+        }
+
+        if ocsp_status == "revoked":
+            return VerificationResult.objects.create(
+                signature_record=signature_record,
+                status=VerificationResult.Status.INVALID,
+                is_signature_valid=True,
+                is_hash_match=True,
+                signer_subject=cert.subject.rfc4514_string(),
+                signer_serial=str(cert.serial_number),
+                detail={
+                    "message": "Signer certificate is revoked according to OCSP.",
+                    **ocsp_info,
+                },
+            )
+
+        if ocsp_status == "unknown":
+            return VerificationResult.objects.create(
+                signature_record=signature_record,
+                status=VerificationResult.Status.INVALID,
+                is_signature_valid=True,
+                is_hash_match=True,
+                signer_subject=cert.subject.rfc4514_string(),
+                signer_serial=str(cert.serial_number),
+                detail={
+                    "message": "OCSP responder returned unknown certificate status.",
+                    **ocsp_info,
+                },
+            )
+    else:
+        ocsp_info = {
+            "ocsp_enabled": False,
+            "ocsp_status": "disabled",
+            "ocsp_message": "OCSP check disabled by settings.",
+        }
+
     timestamp_info = {}
     if signature_record.timestamp_token:
         ts_result = verify_timestamp_for_file(
@@ -231,6 +285,8 @@ def verify_signature_record(signature_record: SignatureRecord) -> VerificationRe
             "timestamp_message": "No timestamp token stored.",
         }
 
+    ltv_info = verify_ltv(signature_record)
+
     return VerificationResult.objects.create(
         signature_record=signature_record,
         status=VerificationResult.Status.VALID,
@@ -240,6 +296,8 @@ def verify_signature_record(signature_record: SignatureRecord) -> VerificationRe
         signer_serial=str(cert.serial_number),
         detail={
             "message": "Signature is valid. File integrity OK. Certificate is trusted by lab CA and currently active.",
+            **ocsp_info,
             **timestamp_info,
+            "ltv": ltv_info,
         },
     )
