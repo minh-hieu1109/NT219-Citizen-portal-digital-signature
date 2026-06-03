@@ -159,9 +159,17 @@ def verify_public_cms_detached(document_file, cms_signature_file):
             "mode": "CAdES/CMS detached",
             "ok": bool(result.get("ok")),
             "status": result.get("status", "invalid"),
+            "signature_valid": bool(result.get("ok")),
             "verification_mode": result.get("verification_mode", ""),
             "message": result.get("message", ""),
             "warning": result.get("warning", ""),
+            "certificate_subject": "-",
+            "certificate_issuer": "-",
+            "certificate_serial": "-",
+            "certificate_time_valid": None,
+            "certificate_trusted_by_lab_ca": None,
+            "certificate_revoked_crl": None,
+            "ocsp_status": "-",
         }
 
     except Exception as exc:

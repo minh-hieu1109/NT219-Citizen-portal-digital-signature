@@ -7,7 +7,7 @@ from pathlib import Path
 from django.conf import settings
 from django.utils import timezone
 
-from accounts.models import UserCertificate
+from accounts.models import UserCertificate, User
 from documents.models import Document
 from .models import SignatureRecord, SigningRequest
 from .signer_backends import get_signer_backend
@@ -16,7 +16,7 @@ from verification.ltv_services import archive_validation_evidence
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, utils
-
+from signing.artifact_services import generate_signature_artifacts
 def create_timestamp_token_for_file(file_path: str) -> dict:
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
@@ -82,6 +82,51 @@ def create_timestamp_token_for_file(file_path: str) -> dict:
             "message": message,
         }
 
+def create_officer_approval_request_after_citizen_sign(citizen_signing_request):
+    """
+    After citizen self-signs a document, automatically create
+    a pending officer approval signing request.
+    """
+    document = citizen_signing_request.document
+    citizen = citizen_signing_request.signer
+
+    # Chỉ auto chuyển nếu người vừa ký là owner của document
+    if document.owner_id != citizen.id:
+        return None
+
+    # Nếu đã có request Officer/Admin pending hoặc signed rồi thì không tạo nữa
+    existing_officer_request = SigningRequest.objects.filter(
+        document=document,
+        signer__role__in=[User.Role.OFFICER, User.Role.ADMIN],
+        status__in=[
+            SigningRequest.Status.PENDING,
+            SigningRequest.Status.SIGNED,
+        ],
+    ).first()
+
+    if existing_officer_request:
+        return existing_officer_request
+
+    # Chọn Officer có cert active
+    officer = User.objects.filter(
+        role=User.Role.OFFICER,
+        is_verified_identity=True,
+        certificate_profile__status=UserCertificate.Status.ACTIVE,
+    ).first()
+
+    if not officer:
+        # Không có officer phù hợp thì thôi, document vẫn ở pending_sign
+        return None
+
+    officer_request = SigningRequest.objects.create(
+        document=document,
+        requested_by=citizen_signing_request.requested_by,
+        signer=officer,
+        signing_type=SigningRequest.SigningType.REMOTE,
+        status=SigningRequest.Status.PENDING,
+    )
+
+    return officer_request
 
 def remote_sign_signing_request(signing_request: SigningRequest) -> SignatureRecord:
     signer = signing_request.signer
@@ -175,7 +220,11 @@ def remote_sign_signing_request(signing_request: SigningRequest) -> SignatureRec
             update_fields=["timestamp_status", "timestamp_message"]
         )
 
-    document.status = Document.Status.SIGNED
+    if signing_request.signer_id == document.owner_id:
+        document.status = Document.Status.PENDING_SIGN
+    else:
+        document.status = Document.Status.SIGNED
+
     document.save(update_fields=["status"])
 
     signing_request.status = SigningRequest.Status.SIGNED
@@ -186,8 +235,20 @@ def remote_sign_signing_request(signing_request: SigningRequest) -> SignatureRec
     try:
         archive_validation_evidence(signature_record)
     except Exception:
-        # LTV archiving is best-effort in lab mode; signing result should remain available.
         pass
+
+    try:
+        generate_signature_artifacts(signature_record)
+    except Exception as e:
+        signature_record.timestamp_message = (
+            (signature_record.timestamp_message or "")
+            + f"\nArtifact generation failed: {str(e)}"
+        )
+        signature_record.save(update_fields=["timestamp_message"])
+
+    # Citizen vừa tự ký xong thì tự tạo request cho Officer
+    if signing_request.signer_id == document.owner_id:
+        create_officer_approval_request_after_citizen_sign(signing_request)
 
     return signature_record
 

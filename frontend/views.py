@@ -29,7 +29,8 @@ from django.conf import settings
 User = get_user_model()
 from verification.public_verify_services import verify_public_cms_detached, verify_public_raw_signature, verify_public_pades 
 from signing.pades_services import create_pades_signature
-
+from signing.artifact_services import generate_signature_artifacts
+from signing.artifact_services import get_signature_artifact_dir
 class OfficerAdminRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
     raise_exception = True
 
@@ -37,6 +38,11 @@ class OfficerAdminRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
         user = self.request.user
         return user.role in {User.Role.OFFICER, User.Role.ADMIN}
 
+def has_active_certificate(user):
+    return UserCertificate.objects.filter(
+        user=user,
+        status=UserCertificate.Status.ACTIVE,
+    ).exists()
 
 class HomeView(TemplateView):
     template_name = "frontend/home.html"
@@ -118,6 +124,26 @@ class DocumentUploadView(LoginRequiredMixin, FormView):
     template_name = "frontend/upload_document.html"
     form_class = DocumentUploadForm
     success_url = reverse_lazy("document-list")
+
+    def dispatch(self, request, *args, **kwargs):
+        user = request.user
+
+        if user.role == User.Role.CITIZEN:
+            if not user.is_verified_identity:
+                messages.error(
+                    request,
+                    "Your identity has not been verified by RA/officer yet."
+                )
+                return redirect("home")
+
+            if not has_active_certificate(user):
+                messages.error(
+                    request,
+                    "You do not have an active certificate yet. Please wait for RA certificate issuance."
+                )
+                return redirect("home")
+
+        return super().dispatch(request, *args, **kwargs)
 
     def form_valid(self, form):
         document = form.save(commit=False)
@@ -205,6 +231,27 @@ class SigningRequestCreateView(LoginRequiredMixin, FormView):
     form_class = SigningRequestForm
     success_url = reverse_lazy("signing-request-list")
 
+    def dispatch(self, request, *args, **kwargs):
+        user = request.user
+
+        if user.role == User.Role.CITIZEN:
+            if not user.is_verified_identity:
+                messages.error(
+                    request,
+                    "Your identity has not been verified. You cannot create signing requests."
+                )
+                return redirect("home")
+
+            if not has_active_certificate(user):
+                messages.error(
+                    request,
+                    "You do not have an active certificate. Please wait for RA certificate issuance."
+                )
+                return redirect("home")
+
+        return super().dispatch(request, *args, **kwargs)
+
+
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
         kwargs["user"] = self.request.user
@@ -253,8 +300,11 @@ class RemoteSignView(LoginRequiredMixin, View):
             messages.error(request, "Signing request not found.")
             return redirect("signing-request-list")
 
-        if signing_request.signer != request.user and request.user.role not in {User.Role.ADMIN, User.Role.OFFICER}:
-            return HttpResponseForbidden("You do not have permission to sign this request.")
+
+        if signing_request.signer != request.user:
+            return HttpResponseForbidden(
+                "Only the assigned signer can sign this request."
+            )
 
         if signing_request.signing_type != SigningRequest.SigningType.REMOTE:
             messages.error(request, "Only remote signing requests can be signed here.")
@@ -262,18 +312,37 @@ class RemoteSignView(LoginRequiredMixin, View):
 
         try:
             signature_record = remote_sign_signing_request(signing_request)
+
+            artifact_result = generate_signature_artifacts(signature_record)
+
             try:
                 log_action(
                     user=request.user,
                     action=AuditLog.Action.REMOTE_SIGNED,
                     object_type="SignatureRecord",
                     object_id=signature_record.id,
-                    detail={"signing_request_id": signing_request.id},
+                    detail={
+                        "signing_request_id": signing_request.id,
+                        "artifacts": artifact_result,
+                    },
                     request=request,
                 )
             except Exception:
                 pass
-            messages.success(request, f"Remote signing completed. Signature ID: {signature_record.id}.")
+
+            if artifact_result.get("ok"):
+                messages.success(
+                    request,
+                    f"Remote signing completed. Signature ID: {signature_record.id}. "
+                    "RAW/CAdES/PAdES artifacts were generated."
+                )
+            else:
+                messages.warning(
+                    request,
+                    f"Remote signing completed. Signature ID: {signature_record.id}. "
+                    "Some verification artifacts were not generated. Check artifact_status.json."
+                )
+
         except Exception as exc:
             try:
                 log_action(
@@ -508,6 +577,248 @@ class PublicVerifyUploadView(FormView):
             {"result": result},
         )
     
+# class DownloadVerificationPackageView(LoginRequiredMixin, View):
+#     def get(self, request, pk):
+#         signature_record = get_object_or_404(
+#             SignatureRecord.objects.select_related(
+#                 "signing_request",
+#                 "signing_request__document",
+#                 "signing_request__requested_by",
+#                 "signing_request__signer",
+#             ),
+#             pk=pk,
+#         )
+
+#         signing_request = signature_record.signing_request
+#         document = signing_request.document
+#         user = request.user
+
+#         allowed = (
+#             user.role in {User.Role.OFFICER, User.Role.ADMIN}
+#             or signing_request.requested_by == user
+#             or signing_request.signer == user
+#         )
+
+#         if not allowed:
+#             return HttpResponseForbidden(
+#                 "You do not have permission to download this verification package."
+#             )
+
+#         if not document.file:
+#             raise Http404("Document file not found.")
+
+#         buffer = io.BytesIO()
+
+#         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+#             document_name = Path(document.file.name).name
+
+#             with document.file.open("rb") as f:
+#                 zf.writestr(f"document/{document_name}", f.read())
+
+#             zf.writestr(
+#                 "signature/signature.sig",
+#                 signature_record.signature_value.encode("utf-8"),
+#             )
+                        
+#             cms_result = {
+#                 "ok": False,
+#                 "message": "CMS signature was not created.",
+#             }
+
+#             try:
+#                 signer_cert_profile = UserCertificate.objects.filter(
+#                     user=signing_request.signer,
+#                     status=UserCertificate.Status.ACTIVE,
+#                 ).first()
+
+#                 if not signer_cert_profile:
+#                     cms_result["message"] = "Signer certificate profile not found."
+#                 elif signer_cert_profile.key_storage_type != UserCertificate.KeyStorageType.FILE:
+#                     cms_result["message"] = (
+#                         "CMS package requires file-based private key in this demo. "
+#                         f"Current key storage: {signer_cert_profile.key_storage_type}"
+#                     )
+#                 elif not signer_cert_profile.private_key_path:
+#                     cms_result["message"] = (
+#                         "Signer private key path is not available. "
+#                         "CMS package requires file-based private key in this demo."
+#                     )
+#                 else:
+#                     key_path = Path(signer_cert_profile.private_key_path)
+
+#                     if not key_path.is_absolute():
+#                         key_path = Path(settings.BASE_DIR) / key_path
+
+#                     if not key_path.exists():
+#                         cms_result["message"] = f"Signer private key not found: {key_path}"
+#                     else:
+#                         with tempfile.TemporaryDirectory() as tmpdir:
+#                             tmpdir = Path(tmpdir)
+
+#                             signer_cert_path = tmpdir / "signer_certificate.pem"
+#                             signer_cert_path.write_text(
+#                                 signature_record.certificate_pem,
+#                                 encoding="utf-8",
+#                             )
+
+#                             cms_signature_path = tmpdir / "signature.p7s"
+
+#                             cms_result = create_cms_detached_signature(
+#                                 input_file=document.file.path,
+#                                 signer_cert_path=str(signer_cert_path),
+#                                 signer_key_path=str(key_path),
+#                                 ca_cert_path=str(settings.PKI_ROOT_CA_CERT),
+#                                 output_path=str(cms_signature_path),
+#                             )
+
+#                             if cms_result.get("ok") and cms_signature_path.exists():
+#                                 zf.writestr(
+#                                     "signature/signature.p7s",
+#                                     cms_signature_path.read_bytes(),
+#                                 )
+
+#             except Exception as exc:
+#                 cms_result = {
+#                     "ok": False,
+#                     "message": f"CMS generation failed: {exc}",
+#                 }
+
+#             zf.writestr(
+#                 "signature/cms_status.txt",
+#                 json.dumps(cms_result, indent=2, ensure_ascii=False),
+#             )
+                        
+#             pades_result = {
+#                 "ok": False,
+#                 "status": "skipped",
+#                 "message": "PAdES was not created.",
+#             }
+
+#             try:
+#                 document_path = Path(document.file.path)
+
+#                 if document_path.suffix.lower() != ".pdf":
+#                     pades_result["message"] = "PAdES skipped because document is not a PDF."
+#                 else:
+#                     signer_cert_profile = UserCertificate.objects.filter(
+#                         user=signing_request.signer,
+#                         status=UserCertificate.Status.ACTIVE,
+#                     ).first()
+
+#                     if not signer_cert_profile:
+#                         pades_result["message"] = "Active signer certificate profile not found."
+#                     elif signer_cert_profile.key_storage_type != UserCertificate.KeyStorageType.FILE:
+#                         pades_result["message"] = (
+#                             "PAdES demo requires file-based private key. "
+#                             f"Current key storage: {signer_cert_profile.key_storage_type}"
+#                         )
+#                     elif not signer_cert_profile.private_key_path:
+#                         pades_result["message"] = "Signer private key path is not available."
+#                     else:
+#                         key_path = Path(signer_cert_profile.private_key_path)
+
+#                         if not key_path.is_absolute():
+#                             key_path = Path(settings.BASE_DIR) / key_path
+
+#                         if not key_path.exists():
+#                             pades_result["message"] = f"Signer private key not found: {key_path}"
+#                         else:
+#                             with tempfile.TemporaryDirectory() as tmpdir:
+#                                 tmpdir = Path(tmpdir)
+
+#                                 signer_cert_path = tmpdir / "signer_certificate.pem"
+#                                 signer_cert_path.write_text(
+#                                     signature_record.certificate_pem,
+#                                     encoding="utf-8",
+#                                 )
+
+#                                 signed_pdf_path = tmpdir / "signed_document.pdf"
+
+#                                 pades_result = create_pades_signature(
+#                                     input_pdf_path=str(document_path),
+#                                     signer_cert_path=str(signer_cert_path),
+#                                     signer_key_path=str(key_path),
+#                                     output_pdf_path=str(signed_pdf_path),
+#                                     ca_cert_path=str(settings.PKI_ROOT_CA_CERT),
+#                                 )
+
+#                                 if pades_result.get("ok") and signed_pdf_path.exists():
+#                                     zf.writestr(
+#                                         "pades/signed_document.pdf",
+#                                         signed_pdf_path.read_bytes(),
+#                                     )
+
+#             except Exception as exc:
+#                 pades_result = {
+#                     "ok": False,
+#                     "status": "error",
+#                     "message": f"PAdES generation failed: {exc}",
+#                 }
+
+#             zf.writestr(
+#                 "pades/pades_status.txt",
+#                 json.dumps(pades_result, indent=2, ensure_ascii=False),
+#             )
+#             zf.writestr(
+#                 "certs/signer_certificate.pem",
+#                 signature_record.certificate_pem or "",
+#             )
+
+#             try:
+#                 ca_cert_path = Path(settings.PKI_ROOT_CA_CERT)
+#                 if ca_cert_path.exists():
+#                     zf.writestr("certs/ca_certificate.pem", ca_cert_path.read_bytes())
+#             except Exception:
+#                 pass
+
+#             if signature_record.timestamp_token:
+#                 try:
+#                     timestamp_bytes = base64.b64decode(signature_record.timestamp_token)
+#                     zf.writestr("timestamp/timestamp.tsr", timestamp_bytes)
+#                 except Exception:
+#                     zf.writestr(
+#                         "timestamp/timestamp_token_base64.txt",
+#                         signature_record.timestamp_token,
+#                     )
+
+#             metadata = {
+#                 "signature_record_id": signature_record.id,
+#                 "signing_request_id": signing_request.id,
+#                 "document_title": document.title,
+#                 "document_sha256": document.sha256_hash,
+#                 "signed_hash": signature_record.signed_hash,
+#                 "signature_format": "RAW + CAdES/CMS detached + PAdES PDF",
+#                 "signature_encoding": "base64",
+#                 "algorithm": signature_record.algorithm,
+#                 "signer_email": signing_request.signer.email if signing_request.signer else "",
+#                 "requester_email": signing_request.requested_by.email,
+#                 "certificate_subject": signature_record.certificate_subject,
+#                 "certificate_serial": signature_record.certificate_serial,
+#                 "signed_at": signature_record.signed_at.isoformat(),
+#                 "timestamp_status": signature_record.timestamp_status,
+#                 "timestamp_message": signature_record.timestamp_message,
+#                 "raw_signature_file": "signature/signature.sig",
+#                 "cms_signature_file": "signature/signature.p7s",
+#                 "cms_signature_created": bool(cms_result.get("ok")),
+#                 "cms_signature_message": cms_result.get("message", ""),
+#                 "pades_signed_pdf_file": "pades/signed_document.pdf",
+#                 "pades_signature_created": bool(pades_result.get("ok")),
+#                 "pades_signature_message": pades_result.get("message", ""),
+#             }
+
+#             zf.writestr(
+#                 "metadata.json",
+#                 json.dumps(metadata, indent=2, ensure_ascii=False),
+#             )
+
+#         buffer.seek(0)
+
+#         response = HttpResponse(buffer.getvalue(), content_type="application/zip")
+#         response["Content-Disposition"] = (
+#             f'attachment; filename="verification_package_signature_{signature_record.id}.zip"'
+#         )
+#         return response
+
 class DownloadVerificationPackageView(LoginRequiredMixin, View):
     def get(self, request, pk):
         signature_record = get_object_or_404(
@@ -538,209 +849,104 @@ class DownloadVerificationPackageView(LoginRequiredMixin, View):
         if not document.file:
             raise Http404("Document file not found.")
 
+        artifact_dir = get_signature_artifact_dir(signature_record)
+
         buffer = io.BytesIO()
+
+        def write_artifact_if_exists(zf, rel_path):
+            src = artifact_dir / rel_path
+            if src.exists():
+                zf.writestr(rel_path, src.read_bytes())
+                return True
+            return False
 
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
             document_name = Path(document.file.name).name
 
+            # 1. Always include original document
             with document.file.open("rb") as f:
                 zf.writestr(f"document/{document_name}", f.read())
 
-            zf.writestr(
-                "signature/signature.sig",
-                signature_record.signature_value.encode("utf-8"),
-            )
-                        
-            cms_result = {
-                "ok": False,
-                "message": "CMS signature was not created.",
-            }
+            # 2. RAW signature
+            # Prefer artifact generated at signing time; fallback to DB value for old records.
+            if not write_artifact_if_exists(zf, "signature/signature.sig"):
+                zf.writestr(
+                    "signature/signature.sig",
+                    signature_record.signature_value.encode("utf-8"),
+                )
 
-            try:
-                signer_cert_profile = UserCertificate.objects.filter(
-                    user=signing_request.signer,
-                    status=UserCertificate.Status.ACTIVE,
-                ).first()
+            # 3. CAdES/CMS artifacts generated at signing time
+            write_artifact_if_exists(zf, "signature/signature.p7s")
+            write_artifact_if_exists(zf, "signature/cms_status.txt")
 
-                if not signer_cert_profile:
-                    cms_result["message"] = "Signer certificate profile not found."
-                elif signer_cert_profile.key_storage_type != UserCertificate.KeyStorageType.FILE:
-                    cms_result["message"] = (
-                        "CMS package requires file-based private key in this demo. "
-                        f"Current key storage: {signer_cert_profile.key_storage_type}"
-                    )
-                elif not signer_cert_profile.private_key_path:
-                    cms_result["message"] = (
-                        "Signer private key path is not available. "
-                        "CMS package requires file-based private key in this demo."
-                    )
-                else:
-                    key_path = Path(signer_cert_profile.private_key_path)
+            # 4. PAdES artifacts generated at signing time
+            write_artifact_if_exists(zf, "pades/signed_document.pdf")
+            write_artifact_if_exists(zf, "pades/pades_status.txt")
 
-                    if not key_path.is_absolute():
-                        key_path = Path(settings.BASE_DIR) / key_path
+            # 5. Signer certificate
+            if not write_artifact_if_exists(zf, "certs/signer_certificate.pem"):
+                zf.writestr(
+                    "certs/signer_certificate.pem",
+                    signature_record.certificate_pem or "",
+                )
 
-                    if not key_path.exists():
-                        cms_result["message"] = f"Signer private key not found: {key_path}"
-                    else:
-                        with tempfile.TemporaryDirectory() as tmpdir:
-                            tmpdir = Path(tmpdir)
-
-                            signer_cert_path = tmpdir / "signer_certificate.pem"
-                            signer_cert_path.write_text(
-                                signature_record.certificate_pem,
-                                encoding="utf-8",
-                            )
-
-                            cms_signature_path = tmpdir / "signature.p7s"
-
-                            cms_result = create_cms_detached_signature(
-                                input_file=document.file.path,
-                                signer_cert_path=str(signer_cert_path),
-                                signer_key_path=str(key_path),
-                                ca_cert_path=str(settings.PKI_ROOT_CA_CERT),
-                                output_path=str(cms_signature_path),
-                            )
-
-                            if cms_result.get("ok") and cms_signature_path.exists():
-                                zf.writestr(
-                                    "signature/signature.p7s",
-                                    cms_signature_path.read_bytes(),
-                                )
-
-            except Exception as exc:
-                cms_result = {
-                    "ok": False,
-                    "message": f"CMS generation failed: {exc}",
-                }
-
-            zf.writestr(
-                "signature/cms_status.txt",
-                json.dumps(cms_result, indent=2, ensure_ascii=False),
-            )
-                        
-            pades_result = {
-                "ok": False,
-                "status": "skipped",
-                "message": "PAdES was not created.",
-            }
-
-            try:
-                document_path = Path(document.file.path)
-
-                if document_path.suffix.lower() != ".pdf":
-                    pades_result["message"] = "PAdES skipped because document is not a PDF."
-                else:
-                    signer_cert_profile = UserCertificate.objects.filter(
-                        user=signing_request.signer,
-                        status=UserCertificate.Status.ACTIVE,
-                    ).first()
-
-                    if not signer_cert_profile:
-                        pades_result["message"] = "Active signer certificate profile not found."
-                    elif signer_cert_profile.key_storage_type != UserCertificate.KeyStorageType.FILE:
-                        pades_result["message"] = (
-                            "PAdES demo requires file-based private key. "
-                            f"Current key storage: {signer_cert_profile.key_storage_type}"
-                        )
-                    elif not signer_cert_profile.private_key_path:
-                        pades_result["message"] = "Signer private key path is not available."
-                    else:
-                        key_path = Path(signer_cert_profile.private_key_path)
-
-                        if not key_path.is_absolute():
-                            key_path = Path(settings.BASE_DIR) / key_path
-
-                        if not key_path.exists():
-                            pades_result["message"] = f"Signer private key not found: {key_path}"
-                        else:
-                            with tempfile.TemporaryDirectory() as tmpdir:
-                                tmpdir = Path(tmpdir)
-
-                                signer_cert_path = tmpdir / "signer_certificate.pem"
-                                signer_cert_path.write_text(
-                                    signature_record.certificate_pem,
-                                    encoding="utf-8",
-                                )
-
-                                signed_pdf_path = tmpdir / "signed_document.pdf"
-
-                                pades_result = create_pades_signature(
-                                    input_pdf_path=str(document_path),
-                                    signer_cert_path=str(signer_cert_path),
-                                    signer_key_path=str(key_path),
-                                    output_pdf_path=str(signed_pdf_path),
-                                    ca_cert_path=str(settings.PKI_ROOT_CA_CERT),
-                                )
-
-                                if pades_result.get("ok") and signed_pdf_path.exists():
-                                    zf.writestr(
-                                        "pades/signed_document.pdf",
-                                        signed_pdf_path.read_bytes(),
-                                    )
-
-            except Exception as exc:
-                pades_result = {
-                    "ok": False,
-                    "status": "error",
-                    "message": f"PAdES generation failed: {exc}",
-                }
-
-            zf.writestr(
-                "pades/pades_status.txt",
-                json.dumps(pades_result, indent=2, ensure_ascii=False),
-            )
-            zf.writestr(
-                "certs/signer_certificate.pem",
-                signature_record.certificate_pem or "",
-            )
-
-            try:
-                ca_cert_path = Path(settings.PKI_ROOT_CA_CERT)
-                if ca_cert_path.exists():
-                    zf.writestr("certs/ca_certificate.pem", ca_cert_path.read_bytes())
-            except Exception:
-                pass
-
-            if signature_record.timestamp_token:
+            # 6. CA certificate
+            if not write_artifact_if_exists(zf, "certs/ca_certificate.pem"):
                 try:
-                    timestamp_bytes = base64.b64decode(signature_record.timestamp_token)
-                    zf.writestr("timestamp/timestamp.tsr", timestamp_bytes)
+                    ca_cert_path = Path(settings.PKI_ROOT_CA_CERT)
+                    if ca_cert_path.exists():
+                        zf.writestr("certs/ca_certificate.pem", ca_cert_path.read_bytes())
                 except Exception:
-                    zf.writestr(
-                        "timestamp/timestamp_token_base64.txt",
-                        signature_record.timestamp_token,
-                    )
+                    pass
 
-            metadata = {
-                "signature_record_id": signature_record.id,
-                "signing_request_id": signing_request.id,
-                "document_title": document.title,
-                "document_sha256": document.sha256_hash,
-                "signed_hash": signature_record.signed_hash,
-                "signature_format": "RAW + CAdES/CMS detached + PAdES PDF",
-                "signature_encoding": "base64",
-                "algorithm": signature_record.algorithm,
-                "signer_email": signing_request.signer.email if signing_request.signer else "",
-                "requester_email": signing_request.requested_by.email,
-                "certificate_subject": signature_record.certificate_subject,
-                "certificate_serial": signature_record.certificate_serial,
-                "signed_at": signature_record.signed_at.isoformat(),
-                "timestamp_status": signature_record.timestamp_status,
-                "timestamp_message": signature_record.timestamp_message,
-                "raw_signature_file": "signature/signature.sig",
-                "cms_signature_file": "signature/signature.p7s",
-                "cms_signature_created": bool(cms_result.get("ok")),
-                "cms_signature_message": cms_result.get("message", ""),
-                "pades_signed_pdf_file": "pades/signed_document.pdf",
-                "pades_signature_created": bool(pades_result.get("ok")),
-                "pades_signature_message": pades_result.get("message", ""),
-            }
+            # 7. Timestamp
+            if not write_artifact_if_exists(zf, "timestamp/timestamp.tsr"):
+                if signature_record.timestamp_token:
+                    try:
+                        timestamp_bytes = base64.b64decode(signature_record.timestamp_token)
+                        zf.writestr("timestamp/timestamp.tsr", timestamp_bytes)
+                    except Exception:
+                        zf.writestr(
+                            "timestamp/timestamp_token_base64.txt",
+                            signature_record.timestamp_token,
+                        )
 
-            zf.writestr(
-                "metadata.json",
-                json.dumps(metadata, indent=2, ensure_ascii=False),
-            )
+            # 8. Metadata and artifact status generated at signing time
+            metadata_exists = write_artifact_if_exists(zf, "metadata.json")
+            write_artifact_if_exists(zf, "artifact_status.json")
+
+            # 9. Fallback metadata for old signatures without generated artifacts
+            if not metadata_exists:
+                metadata = {
+                    "signature_record_id": signature_record.id,
+                    "signing_request_id": signing_request.id,
+                    "document_title": document.title,
+                    "document_sha256": document.sha256_hash,
+                    "signed_hash": signature_record.signed_hash,
+                    "signature_format": "RAW + CAdES/CMS detached + PAdES PDF",
+                    "signature_encoding": "base64",
+                    "algorithm": signature_record.algorithm,
+                    "signer_email": signing_request.signer.email if signing_request.signer else "",
+                    "requester_email": signing_request.requested_by.email,
+                    "certificate_subject": signature_record.certificate_subject,
+                    "certificate_serial": signature_record.certificate_serial,
+                    "signed_at": signature_record.signed_at.isoformat(),
+                    "timestamp_status": signature_record.timestamp_status,
+                    "timestamp_message": signature_record.timestamp_message,
+                    "raw_signature_file": "signature/signature.sig",
+                    "cms_signature_file": "signature/signature.p7s",
+                    "pades_signed_pdf_file": "pades/signed_document.pdf",
+                    "note": (
+                        "This is fallback metadata. CAdES/PAdES artifacts may be missing "
+                        "because this signature was created before artifact generation was moved "
+                        "to the signing step."
+                    ),
+                }
+
+                zf.writestr(
+                    "metadata.json",
+                    json.dumps(metadata, indent=2, ensure_ascii=False),
+                )
 
         buffer.seek(0)
 
