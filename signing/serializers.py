@@ -68,7 +68,24 @@ class SigningRequestSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         request = self.context["request"]
-        if attrs.get("signer") is None:
+        signing_type = attrs.get("signing_type", SigningRequest.SigningType.CLIENT)
+
+        if request.user.role == request.user.Role.CITIZEN:
+            if signing_type != SigningRequest.SigningType.CLIENT:
+                raise serializers.ValidationError(
+                    {"detail": "Citizen document signing must use client signing."}
+                )
+            if not request.user.is_verified_identity or not hasattr(request.user, "certificate_profile"):
+                raise serializers.ValidationError(
+                    {"detail": "Your identity must be verified and a certificate must be issued before signing."}
+                )
+            if request.user.certificate_profile.status != "active":
+                raise serializers.ValidationError(
+                    {"detail": "Your identity must be verified and a certificate must be issued before signing."}
+                )
+            attrs["signer"] = request.user
+            attrs["signing_type"] = SigningRequest.SigningType.CLIENT
+        elif attrs.get("signer") is None:
             attrs["signer"] = request.user
         return attrs
 
@@ -82,7 +99,7 @@ class SigningRequestSerializer(serializers.ModelSerializer):
             signer=validated_data["signer"],
             signing_type=validated_data.get(
                 "signing_type",
-                SigningRequest.SigningType.REMOTE,
+                SigningRequest.SigningType.CLIENT,
             ),
             status=SigningRequest.Status.PENDING,
         )
@@ -104,6 +121,7 @@ class SigningRequestSerializer(serializers.ModelSerializer):
                 "requested_by_email": signing_request.requested_by.email,
                 "signer_id": signing_request.signer.id if signing_request.signer else None,
                 "signer_email": signing_request.signer.email if signing_request.signer else None,
+                "signature_purpose": signing_request.signature_purpose,
             },
             request=request,
         )
@@ -199,7 +217,7 @@ class RemoteSignSerializer(serializers.Serializer):
 
         log_action(
             user=request.user,
-            action=AuditLog.Action.REMOTE_SIGNED,
+            action=AuditLog.Action.OFFICER_APPROVAL_SIGNED,
             object_type="SigningRequest",
             object_id=signing_request.id,
             detail={
@@ -213,13 +231,14 @@ class RemoteSignSerializer(serializers.Serializer):
                 "timestamp_status": signature_record.timestamp_status,
                 "signer_id": signing_request.signer.id,
                 "signer_email": signing_request.signer.email,
+                "signature_purpose": signing_request.signature_purpose,
             },
             request=request,
         )
 
         return {
             "signing_request_id": signing_request.id,
-            "message": "Remote signing completed successfully.",
+            "message": "Officer approval signing completed successfully.",
             "signature_record": signature_record,
         }
     
@@ -231,6 +250,8 @@ class ClientSignPrepareSerializer(serializers.Serializer):
     digest_hex = serializers.CharField(read_only=True)
     algorithm = serializers.CharField(read_only=True)
     certificate_serial = serializers.CharField(read_only=True)
+    signature_purpose = serializers.CharField(read_only=True)
+    signer_email = serializers.EmailField(read_only=True)
 
     def validate(self, attrs):
         signing_request = self.context["signing_request"]
@@ -349,7 +370,7 @@ class ClientSignCompleteSerializer(serializers.Serializer):
 
         log_action(
             user=request.user,
-            action=AuditLog.Action.REMOTE_SIGNED,
+            action=AuditLog.Action.CLIENT_SIGNED,
             object_type="SigningRequest",
             object_id=signing_request.id,
             detail={
@@ -364,6 +385,7 @@ class ClientSignCompleteSerializer(serializers.Serializer):
                 "timestamp_status": signature_record.timestamp_status,
                 "signer_id": signing_request.signer.id,
                 "signer_email": signing_request.signer.email,
+                "signature_purpose": signing_request.signature_purpose,
             },
             request=request,
         )

@@ -63,6 +63,12 @@ class SigningRequest(models.Model):
     def __str__(self):
         return f"SigningRequest #{self.id} - {self.document.title} - {self.status}"
 
+    @property
+    def signature_purpose(self):
+        if self.signing_type == self.SigningType.CLIENT:
+            return "citizen_signature"
+        return "officer_approval_signature"
+
 
 class SignatureRecord(models.Model):
     signing_request = models.OneToOneField(
@@ -84,3 +90,11 @@ class SignatureRecord(models.Model):
 
     def __str__(self):
         return f"SignatureRecord #{self.id} - Request #{self.signing_request.id}"
+
+    @property
+    def signer(self):
+        return self.signing_request.signer
+
+    @property
+    def signature_purpose(self):
+        return self.signing_request.signature_purpose

@@ -41,6 +41,15 @@ class FinalWebUXTests(TestCase):
             private_key_path="/tmp/officer.key",
             status=UserCertificate.Status.ACTIVE,
         )
+        UserCertificate.objects.create(
+            user=self.citizen,
+            certificate_pem="pem",
+            certificate_subject="CN=citizen",
+            certificate_serial="UX-CIT-CERT-001",
+            key_storage_type=UserCertificate.KeyStorageType.FILE,
+            private_key_path="/tmp/citizen.key",
+            status=UserCertificate.Status.ACTIVE,
+        )
         self.document = Document.objects.create(
             owner=self.citizen,
             title="UX Document",
@@ -53,7 +62,7 @@ class FinalWebUXTests(TestCase):
         self.client.force_login(self.citizen)
         response = self.client.post(
             "/signing/requests/create/",
-            {"document": self.document.id, "signer": self.officer.id, "signing_type": "remote"},
+            {"document": self.document.id, "signing_type": "client"},
             follow=True,
         )
         self.assertEqual(response.status_code, 200)
@@ -83,7 +92,7 @@ class FinalWebUXTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(
             AuditLog.objects.filter(
-                action=AuditLog.Action.REMOTE_SIGNED,
+                action=AuditLog.Action.OFFICER_APPROVAL_SIGNED,
                 object_type="SignatureRecord",
             ).exists()
         )
@@ -174,4 +183,4 @@ class FinalWebUXTests(TestCase):
         self.assertEqual(response.status_code, 200)
         content = response.content.decode("utf-8")
         self.assertIn("This signing request has expired.", content)
-        self.assertNotIn("Remote Sign</button>", content)
+        self.assertNotIn("Officer Approval Sign</button>", content)

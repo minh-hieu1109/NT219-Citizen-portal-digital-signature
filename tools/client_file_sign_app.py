@@ -14,8 +14,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / '.env')
 
 BASE_URL = os.getenv('PORTAL_BASE_URL', 'http://127.0.0.1:8000')
-EMAIL = os.getenv('TOOL_EMAIL', 'citizen6@example.com')
-PASSWORD = os.getenv('TOOL_PASSWORD', 'Mhiu@123')
+EMAIL = os.getenv('TOOL_EMAIL', 'client@example.com')
+PASSWORD = os.getenv('TOOL_PASSWORD', 'Client@123456')
 
 key_dir_value = os.getenv('CLIENT_KEY_DIR', str(BASE_DIR / 'keys'))
 KEY_DIR = Path(key_dir_value)
@@ -82,13 +82,13 @@ def create_csr():
         .subject_name(
             x509.Name(
                 [
-                    x509.NameAttribute(NameOID.COUNTRY_NAME, "VN"),
-                    x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "HCM"),
-                    x509.NameAttribute(NameOID.LOCALITY_NAME, "HCM"),
-                    x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Citizen Portal"),
-                    x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, "Citizen"),
-                    x509.NameAttribute(NameOID.COMMON_NAME, "Citizen Four"),
-                    x509.NameAttribute(NameOID.EMAIL_ADDRESS, EMAIL),
+                    x509.NameAttribute(NameOID.COUNTRY_NAME, CSR_COUNTRY),
+                    x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, CSR_STATE),
+                    x509.NameAttribute(NameOID.LOCALITY_NAME, CSR_LOCALITY),
+                    x509.NameAttribute(NameOID.ORGANIZATION_NAME, CSR_ORG),
+                    x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, CSR_OU),
+                    x509.NameAttribute(NameOID.COMMON_NAME, CSR_COMMON_NAME),
+                    x509.NameAttribute(NameOID.EMAIL_ADDRESS, CSR_EMAIL),
                 ]
             )
         )
@@ -112,6 +112,10 @@ def enroll_certificate():
     payload = {
         "csr_pem": csr_pem,
         "key_storage_type": "file",
+        "private_key_path": os.getenv(
+            "CLIENT_PRIVATE_KEY_PATH",
+            f"/app/keys/{PRIVATE_KEY_PATH.name}",
+        ),
     }
 
     resp = requests.post(

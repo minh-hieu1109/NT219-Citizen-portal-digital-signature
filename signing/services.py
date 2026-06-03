@@ -205,6 +205,13 @@ def prepare_client_signing_request(signing_request: SigningRequest) -> dict:
     if signing_request.signing_type != SigningRequest.SigningType.CLIENT:
         raise ValueError("This signing request is not a client signing request.")
 
+    now = timezone.now()
+    if signing_request.expires_at and now > signing_request.expires_at:
+        raise ValueError("Signing request has expired.")
+
+    if signing_request.used_at is not None:
+        raise ValueError("Signing request has already been used (replay detected).")
+
     if signing_request.status != SigningRequest.Status.PENDING:
         raise ValueError("This signing request is not in pending status.")
 
@@ -229,6 +236,8 @@ def prepare_client_signing_request(signing_request: SigningRequest) -> dict:
         "digest_hex": file_hash_hex,
         "algorithm": "RSA-SHA256-PREHASHED",
         "certificate_serial": user_cert.certificate_serial,
+        "signature_purpose": signing_request.signature_purpose,
+        "signer_email": signer.email,
     }
 
 
@@ -243,6 +252,13 @@ def complete_client_signing_request(
 
     if signing_request.signing_type != SigningRequest.SigningType.CLIENT:
         raise ValueError("This signing request is not a client signing request.")
+
+    now = timezone.now()
+    if signing_request.expires_at and now > signing_request.expires_at:
+        raise ValueError("Signing request has expired.")
+
+    if signing_request.used_at is not None:
+        raise ValueError("Signing request has already been used (replay detected).")
 
     if signing_request.status != SigningRequest.Status.PENDING:
         raise ValueError("This signing request is not in pending status.")
@@ -309,8 +325,9 @@ def complete_client_signing_request(
     document.save(update_fields=["status"])
 
     signing_request.status = SigningRequest.Status.SIGNED
+    signing_request.used_at = timezone.now()
     signing_request.completed_at = signature_record.signed_at
-    signing_request.save(update_fields=["status", "completed_at"])
+    signing_request.save(update_fields=["status", "used_at", "completed_at"])
 
     try:
         archive_validation_evidence(signature_record)

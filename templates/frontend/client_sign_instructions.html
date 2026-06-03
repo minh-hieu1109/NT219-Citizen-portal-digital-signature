@@ -16,10 +16,19 @@
 <div class="card">
     <h3>Steps</h3>
     <ol>
-        <li>Generate or use existing local key and certificate via script.</li>
-        <li>Run <code>python tools/client_file_sign_app.py</code> after cấu hình email/password và request id.</li>
-        <li>Nếu cần, mở <code>tools/client_enroll_file.py</code> để đăng ký certificate.</li>
+        <li>Create demo client data: <code>docker compose exec web python manage.py create_client_file_sign_demo_data</code></li>
+        <li>Copy the request id printed by the command.</li>
+        <li>Run the local file-key client signer with the demo key: <code>docker compose exec -e CLIENT_PRIVATE_KEY_FILENAME=client_demo_private_key.pem -e CLIENT_CSR_FILENAME=client_demo_request.csr -e CLIENT_CERT_FILENAME=client_demo_certificate.pem -e TOOL_EMAIL=client@example.com -e TOOL_PASSWORD=Client@123456 -e PORTAL_BASE_URL=http://127.0.0.1:8000 web python tools/client_file_sign_app.py {{ signing_request.id }}</code></li>
+        <li>Refresh this page and verify the signature from the document detail page.</li>
     </ol>
+</div>
+
+<div class="card">
+    <h3>Demo defaults</h3>
+    <p><strong>Signer:</strong> <code>client@example.com</code></p>
+    <p><strong>Password:</strong> <code>Client@123456</code></p>
+    <p><strong>Private key:</strong> <code>keys/client_demo_private_key.pem</code></p>
+    <p><strong>Certificate:</strong> <code>keys/client_demo_certificate.pem</code></p>
 </div>
 
 <div class="actions">

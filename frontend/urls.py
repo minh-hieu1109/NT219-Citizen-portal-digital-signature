@@ -2,6 +2,7 @@
 
 from .views import (
     AuditLogListView,
+    ClientAutoSignView,
     ClientSignInstructionsView,
     DocumentDetailView,
     DocumentListView,
@@ -23,6 +24,7 @@ urlpatterns = [
     path("", HomeView.as_view(), name="home"),
     path("documents/", DocumentListView.as_view(), name="document-list"),
     path("documents/upload/", DocumentUploadView.as_view(), name="document-upload"),
+    path("documents/client-auto-sign/", ClientAutoSignView.as_view(), name="client-auto-sign"),
     path("documents/<int:pk>/", DocumentDetailView.as_view(), name="document-detail"),
     path("signing/requests/", SigningRequestListView.as_view(), name="signing-request-list"),
     path("signing/requests/create/", SigningRequestCreateView.as_view(), name="signing-request-create"),

@@ -16,8 +16,9 @@
             <th>ID</th>
             <th>Document</th>
             <th>Requester</th>
-            <th>Signer</th>
+            <th>Signer certificate owner</th>
             <th>Type</th>
+            <th>Purpose</th>
             <th>Status</th>
             <th>Nonce</th>
             <th>Expires</th>
@@ -33,6 +34,7 @@
             <td>{{ request.requested_by.email }}</td>
             <td>{{ request.signer.email }}</td>
             <td>{{ request.get_signing_type_display }}</td>
+            <td>{{ request.signature_purpose }}</td>
             <td>{{ request.get_status_display }}</td>
             <td class="mono">{{ request.nonce }}</td>
             <td>{{ request.expires_at|date:'Y-m-d H:i:s' }}</td>

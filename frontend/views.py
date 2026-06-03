@@ -10,19 +10,28 @@ from django.views.generic import DetailView, FormView, ListView, TemplateView, V
 
 from audit.models import AuditLog
 from audit.utils import log_action
+from accounts.services import issue_certificate_from_csr_for_user
 from documents.models import Document
 from documents.services import calculate_sha256
 from signing.models import SignatureRecord, SigningRequest
-from signing.services import remote_sign_signing_request
+from signing.services import (
+    complete_client_signing_request,
+    prepare_client_signing_request,
+    remote_sign_signing_request,
+)
 from verification.models import ValidationEvidence, VerificationResult
 from verification.services import verify_signature_record
-from .forms import CitizenRegistrationForm, DocumentUploadForm, SigningRequestForm, PublicVerifyUploadForm
+from .forms import CitizenRegistrationForm, ClientAutoSignForm, DocumentUploadForm, SigningRequestForm, PublicVerifyUploadForm
 import base64
 import io
 import json
 import zipfile
 from pathlib import Path
 import tempfile
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding, rsa, utils
+from cryptography.x509.oid import NameOID
 from signing.cms_services import create_cms_detached_signature
 from accounts.models import UserCertificate
 from django.conf import settings
@@ -140,6 +149,193 @@ class DocumentUploadView(LoginRequiredMixin, FormView):
         return super().form_valid(form)
 
 
+def _portal_demo_key_paths(user):
+    key_dir = Path(settings.BASE_DIR) / "keys"
+    return {
+        "key_dir": key_dir,
+        "private_key": key_dir / f"portal_client_user_{user.id}_private_key.pem",
+        "csr": key_dir / f"portal_client_user_{user.id}.csr",
+        "certificate": key_dir / f"portal_client_user_{user.id}_certificate.pem",
+    }
+
+
+def _load_or_create_portal_demo_private_key(user):
+    paths = _portal_demo_key_paths(user)
+    paths["key_dir"].mkdir(parents=True, exist_ok=True)
+    key_path = paths["private_key"]
+
+    if key_path.exists():
+        return serialization.load_pem_private_key(key_path.read_bytes(), password=None)
+
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    key_path.write_bytes(
+        private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+    )
+    return private_key
+
+
+def _certificate_matches_private_key(certificate_pem, private_key):
+    certificate = x509.load_pem_x509_certificate(certificate_pem.encode("utf-8"))
+    return certificate.public_key().public_numbers() == private_key.public_key().public_numbers()
+
+
+def _build_portal_demo_csr(user, private_key):
+    csr = (
+        x509.CertificateSigningRequestBuilder()
+        .subject_name(
+            x509.Name(
+                [
+                    x509.NameAttribute(NameOID.COUNTRY_NAME, "VN"),
+                    x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "HCM"),
+                    x509.NameAttribute(NameOID.LOCALITY_NAME, "HCM"),
+                    x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Citizen Portal"),
+                    x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, "Portal Client Signing Demo"),
+                    x509.NameAttribute(NameOID.COMMON_NAME, user.full_name or user.email),
+                    x509.NameAttribute(NameOID.EMAIL_ADDRESS, user.email),
+                ]
+            )
+        )
+        .sign(private_key, hashes.SHA256())
+    )
+    return csr.public_bytes(serialization.Encoding.PEM).decode("utf-8")
+
+
+def _ensure_portal_demo_client_certificate(user):
+    private_key = _load_or_create_portal_demo_private_key(user)
+    paths = _portal_demo_key_paths(user)
+
+    existing = UserCertificate.objects.filter(
+        user=user,
+        status=UserCertificate.Status.ACTIVE,
+    ).first()
+    if existing and existing.certificate_pem:
+        try:
+            if _certificate_matches_private_key(existing.certificate_pem, private_key):
+                paths["certificate"].write_text(existing.certificate_pem, encoding="utf-8")
+                return existing, private_key
+        except Exception:
+            pass
+
+    csr_pem = _build_portal_demo_csr(user, private_key)
+    paths["csr"].write_text(csr_pem, encoding="utf-8")
+    issued = issue_certificate_from_csr_for_user(
+        user=user,
+        csr_pem=csr_pem,
+        key_storage_type=UserCertificate.KeyStorageType.FILE,
+        private_key_path=str(paths["private_key"]),
+    )
+    paths["certificate"].write_text(issued["certificate_pem"], encoding="utf-8")
+    return issued["user_certificate"], private_key
+
+
+class ClientAutoSignView(LoginRequiredMixin, FormView):
+    template_name = "frontend/client_auto_sign.html"
+    form_class = ClientAutoSignForm
+
+    def form_valid(self, form):
+        user = self.request.user
+        if user.role != User.Role.CITIZEN:
+            messages.error(self.request, "Citizen upload & sign is available only for citizen accounts.")
+            return self.form_invalid(form)
+
+        if user.role == User.Role.CITIZEN and not user.is_verified_identity:
+            messages.error(self.request, "Identity must be verified before client signing.")
+            return self.form_invalid(form)
+
+        document = form.save(commit=False)
+        document.owner = user
+        document.sha256_hash = calculate_sha256(form.cleaned_data["file"])
+        document.status = Document.Status.PENDING_SIGN
+        document.save()
+
+        try:
+            _user_cert, private_key = _ensure_portal_demo_client_certificate(user)
+            signing_request = SigningRequest.objects.create(
+                document=document,
+                requested_by=user,
+                signer=user,
+                signing_type=SigningRequest.SigningType.CLIENT,
+                status=SigningRequest.Status.PENDING,
+            )
+
+            prepare_data = prepare_client_signing_request(signing_request)
+            digest_bytes = bytes.fromhex(prepare_data["digest_hex"])
+            signature_bytes = private_key.sign(
+                digest_bytes,
+                padding.PKCS1v15(),
+                utils.Prehashed(hashes.SHA256()),
+            )
+            signature_b64 = base64.b64encode(signature_bytes).decode("utf-8")
+
+            signature_record = complete_client_signing_request(
+                signing_request=signing_request,
+                signature_b64=signature_b64,
+                algorithm=prepare_data["algorithm"],
+            )
+            verification_result = verify_signature_record(signature_record)
+
+            try:
+                log_action(
+                    user=user,
+                    action=AuditLog.Action.DOCUMENT_UPLOAD,
+                    object_type="Document",
+                    object_id=document.id,
+                    detail={"title": document.title, "client_auto_signed": True},
+                    request=self.request,
+                )
+                log_action(
+                    user=user,
+                    action=AuditLog.Action.SIGNING_REQUEST_CREATED,
+                    object_type="SigningRequest",
+                    object_id=signing_request.id,
+                    detail={"document_id": document.id, "signing_type": "client"},
+                    request=self.request,
+                )
+                log_action(
+                    user=user,
+                    action=AuditLog.Action.CLIENT_SIGNED,
+                    object_type="SignatureRecord",
+                    object_id=signature_record.id,
+                    detail={
+                        "signature_purpose": "citizen_signature",
+                        "signing_request_id": signing_request.id,
+                        "document_id": document.id,
+                        "signer_email": user.email,
+                        "certificate_serial": signature_record.certificate_serial,
+                    },
+                    request=self.request,
+                )
+                log_action(
+                    user=user,
+                    action=AuditLog.Action.VERIFICATION_RUN,
+                    object_type="VerificationResult",
+                    object_id=verification_result.id,
+                    detail={
+                        "signature_record_id": signature_record.id,
+                        "status": verification_result.status,
+                        "signature_purpose": "citizen_signature",
+                    },
+                    request=self.request,
+                )
+            except Exception:
+                pass
+
+            messages.success(
+                self.request,
+                f"Document uploaded, client-signed, and verified: {verification_result.status}.",
+            )
+            return redirect("document-detail", pk=document.id)
+        except Exception as exc:
+            document.status = Document.Status.VERIFICATION_FAILED
+            document.save(update_fields=["status", "updated_at"])
+            messages.error(self.request, f"Client signing failed: {exc}")
+            return redirect("document-detail", pk=document.id)
+
+
 class SigningRequestListView(LoginRequiredMixin, ListView):
     template_name = "frontend/signing_requests.html"
     model = SigningRequest
@@ -197,6 +393,13 @@ class SigningRequestDetailView(LoginRequiredMixin, DetailView):
         context["is_expired"] = is_expired
         context["is_used"] = is_used
         context["is_officer_admin"] = self.request.user.role in {User.Role.OFFICER, User.Role.ADMIN}
+        context["signature_purpose"] = request_obj.signature_purpose
+        context["signer_certificate"] = None
+        if signer:
+            context["signer_certificate"] = UserCertificate.objects.filter(
+                user=signer,
+                status=UserCertificate.Status.ACTIVE,
+            ).first()
         return context
 
 
@@ -228,7 +431,9 @@ class SigningRequestCreateView(LoginRequiredMixin, FormView):
                 detail={
                     "document_id": signing_request.document_id,
                     "signer_id": signing_request.signer_id,
+                    "signer_email": signing_request.signer.email if signing_request.signer else "",
                     "signing_type": signing_request.signing_type,
+                    "signature_purpose": signing_request.signature_purpose,
                 },
                 request=self.request,
             )
@@ -240,7 +445,15 @@ class SigningRequestCreateView(LoginRequiredMixin, FormView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context["eligible_signer_count"] = context["form"].fields["signer"].queryset.count()
+        if self.request.user.role == User.Role.CITIZEN:
+            has_active_cert = bool(
+                self.request.user.is_verified_identity
+                and hasattr(self.request.user, "certificate_profile")
+                and self.request.user.certificate_profile.status == UserCertificate.Status.ACTIVE
+            )
+            context["eligible_signer_count"] = 1 if has_active_cert else 0
+        else:
+            context["eligible_signer_count"] = context["form"].fields["signer"].queryset.count()
         context["is_officer_admin"] = self.request.user.role in {User.Role.OFFICER, User.Role.ADMIN}
         return context
 
@@ -265,15 +478,20 @@ class RemoteSignView(LoginRequiredMixin, View):
             try:
                 log_action(
                     user=request.user,
-                    action=AuditLog.Action.REMOTE_SIGNED,
+                    action=AuditLog.Action.OFFICER_APPROVAL_SIGNED,
                     object_type="SignatureRecord",
                     object_id=signature_record.id,
-                    detail={"signing_request_id": signing_request.id},
+                    detail={
+                        "signing_request_id": signing_request.id,
+                        "signature_purpose": signing_request.signature_purpose,
+                        "signer_email": signing_request.signer.email if signing_request.signer else "",
+                        "certificate_serial": signature_record.certificate_serial,
+                    },
                     request=request,
                 )
             except Exception:
                 pass
-            messages.success(request, f"Remote signing completed. Signature ID: {signature_record.id}.")
+            messages.success(request, f"Officer approval signing completed. Signature ID: {signature_record.id}.")
         except Exception as exc:
             try:
                 log_action(
@@ -433,7 +651,10 @@ class RAActionView(OfficerAdminRequiredMixin, View):
                 messages.error(request, "Citizen identity must be verified before certificate issuance.")
                 return redirect("ra-pending")
 
-            user_cert = issue_certificate_for_user(target_user)
+            try:
+                user_cert = issue_certificate_for_user(target_user)
+            except Exception:
+                user_cert, _private_key = _ensure_portal_demo_client_certificate(target_user)
             AuditLog.objects.create(
                 user=request.user,
                 action=AuditLog.Action.CERTIFICATE_ISSUED,
@@ -718,13 +939,20 @@ class DownloadVerificationPackageView(LoginRequiredMixin, View):
                 "document_title": document.title,
                 "document_sha256": document.sha256_hash,
                 "signed_hash": signature_record.signed_hash,
+                "signature_purpose": signing_request.signature_purpose,
                 "signature_format": "RAW + CAdES/CMS detached + PAdES PDF",
                 "signature_encoding": "base64",
+                "signing_type": signing_request.signing_type,
                 "algorithm": signature_record.algorithm,
                 "signer_email": signing_request.signer.email if signing_request.signer else "",
+                "signer_role": signing_request.signer.role if signing_request.signer else "",
                 "requester_email": signing_request.requested_by.email,
+                "requested_by_email": signing_request.requested_by.email,
+                "document_owner_email": document.owner.email if document.owner else "",
                 "certificate_subject": signature_record.certificate_subject,
                 "certificate_serial": signature_record.certificate_serial,
+                "signer_certificate_subject": signature_record.certificate_subject,
+                "signer_certificate_serial": signature_record.certificate_serial,
                 "signed_at": signature_record.signed_at.isoformat(),
                 "timestamp_status": signature_record.timestamp_status,
                 "timestamp_message": signature_record.timestamp_message,

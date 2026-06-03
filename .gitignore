@@ -11,6 +11,13 @@ experiments/results/*
 media/
 *.zip
 
+keys/client_demo_private_key.pem
+keys/client_demo_request.csr
+keys/client_demo_certificate.pem
+keys/portal_client_user_*_private_key.pem
+keys/portal_client_user_*.csr
+keys/portal_client_user_*_certificate.pem
+
 pki-lab/certs/rootCA.srl
 pki-lab/tsa/tsaserial
 pki-lab/certs/users/user_*.crt

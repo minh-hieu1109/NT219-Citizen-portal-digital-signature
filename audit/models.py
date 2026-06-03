@@ -7,6 +7,8 @@ class AuditLog(models.Model):
         DOCUMENT_UPLOAD = "document_upload", "Document Upload"
         SIGNING_REQUEST_CREATED = "signing_request_created", "Signing Request Created"
         REMOTE_SIGNED = "remote_signed", "Remote Signed"
+        CLIENT_SIGNED = "client_signed", "Client Signed"
+        OFFICER_APPROVAL_SIGNED = "officer_approval_signed", "Officer Approval Signed"
         VERIFICATION_RUN = "verification_run", "Verification Run"
         IDENTITY_VERIFIED = "identity_verified", "Identity Verified"
         IDENTITY_REJECTED = "identity_rejected", "Identity Rejected"

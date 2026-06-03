@@ -3,13 +3,13 @@
 {% block content %}
 <div class="page-header">
     <h2>Create Signing Request</h2>
-    <p>Select a document and signing type.</p>
+    <p>Citizen document signing uses the citizen certificate owner as signer.</p>
 </div>
 
 <div class="card">
     {% if eligible_signer_count == 0 %}
     <div class="message error">
-        No eligible signer found. Please verify identity and issue certificate in RA panel first.
+        Your identity must be verified and a certificate must be issued before signing.
         {% if is_officer_admin %}
         <a href="{% url 'ra-pending' %}">Go to RA panel</a>
         {% endif %}
@@ -38,7 +38,7 @@
                 <div class="field-error">{{ form.signer.errors.0 }}</div>
             {% endif %}
         </div>
-        <button type="submit" class="button" {% if eligible_signer_count == 0 %}disabled{% endif %}>Create signing request</button>
+        <button type="submit" class="button" {% if eligible_signer_count == 0 %}disabled{% endif %}>Create citizen signing request</button>
     </form>
 </div>
 {% endblock %}

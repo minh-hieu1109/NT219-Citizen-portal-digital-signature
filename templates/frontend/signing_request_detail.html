@@ -8,8 +8,11 @@
 <div class="card">
     <p><strong>Document:</strong> <a href="{% url 'document-detail' signing_request.document.id %}">{{ signing_request.document.title }}</a></p>
     <p><strong>Requester:</strong> {{ signing_request.requested_by.email }}</p>
-    <p><strong>Signer:</strong> {{ signing_request.signer.email }}</p>
+    <p><strong>Document owner:</strong> {{ signing_request.document.owner.email }}</p>
+    <p><strong>Signer certificate owner:</strong> {{ signing_request.signer.email }}</p>
     <p><strong>Type:</strong> {{ signing_request.get_signing_type_display }}</p>
+    <p><strong>Signature purpose:</strong> {{ signature_purpose }}</p>
+    <p><strong>Certificate subject:</strong> {{ signer_certificate.certificate_subject|default:'-' }}</p>
     <p><strong>Status:</strong> {{ signing_request.get_status_display }}</p>
     <p><strong>Nonce:</strong> <span class="mono">{{ signing_request.nonce }}</span></p>
     <p><strong>Expires At:</strong> {{ signing_request.expires_at|date:'Y-m-d H:i:s' }}</p>
@@ -22,7 +25,7 @@
     {% if can_show_remote_sign %}
         <form method="post" action="{% url 'remote-sign' signing_request.id %}">
             {% csrf_token %}
-            <button class="button" type="submit">Remote Sign</button>
+            <button class="button" type="submit">Officer Approval Sign</button>
         </form>
     {% elif signing_request.signing_type == 'client' and signing_request.status == 'pending' %}
         <a class="button" href="{% url 'client-sign-instructions' signing_request.id %}">Client Sign Instructions</a>
@@ -55,6 +58,9 @@
     {% if signing_request.signature_record %}
         <p><strong>ID:</strong> {{ signing_request.signature_record.id }}</p>
         <p><strong>Algorithm:</strong> {{ signing_request.signature_record.algorithm }}</p>
+        <p><strong>Signer:</strong> {{ signing_request.signature_record.signer.email }}</p>
+        <p><strong>Certificate Subject:</strong> {{ signing_request.signature_record.certificate_subject }}</p>
+        <p><strong>Certificate Serial:</strong> {{ signing_request.signature_record.certificate_serial }}</p>
         <p><strong>Signed Hash:</strong> <span class="mono">{{ signing_request.signature_record.signed_hash }}</span></p>
         <p><strong>Signed At:</strong> {{ signing_request.signature_record.signed_at|date:'Y-m-d H:i:s' }}</p>
         <form method="post" action="{% url 'verify-signature' signing_request.signature_record.id %}">

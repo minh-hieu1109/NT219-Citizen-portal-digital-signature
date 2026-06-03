@@ -1,0 +1,34 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="page-header">
+    <h2>Citizen Upload & Sign</h2>
+    <p>Upload a document and sign it with the logged-in citizen certificate.</p>
+</div>
+
+<div class="card">
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div class="form-group">
+            {{ form.title.label_tag }}
+            {{ form.title }}
+            {% if form.title.errors %}
+                <div class="field-error">{{ form.title.errors.0 }}</div>
+            {% endif %}
+        </div>
+        <div class="form-group">
+            {{ form.file.label_tag }}
+            {{ form.file }}
+            {% if form.file.errors %}
+                <div class="field-error">{{ form.file.errors.0 }}</div>
+            {% endif %}
+        </div>
+        <button type="submit" class="button">Upload and sign as citizen</button>
+    </form>
+</div>
+
+<div class="card">
+    <h3>Demo behavior</h3>
+    <p class="muted">This Citizen Client File Signing Demo creates or reuses a demo local client key bound to the logged-in citizen, issues a matching citizen certificate when needed, signs the document digest as a client signing request, then verifies the result with the citizen certificate.</p>
+</div>
+{% endblock %}

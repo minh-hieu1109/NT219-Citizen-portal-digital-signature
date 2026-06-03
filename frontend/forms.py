@@ -17,10 +17,26 @@ class DocumentUploadForm(forms.ModelForm):
         }
 
 
+class ClientAutoSignForm(forms.ModelForm):
+    class Meta:
+        model = Document
+        fields = ["title", "file"]
+        widgets = {
+            "title": forms.TextInput(
+                attrs={
+                    "class": "form-control",
+                    "placeholder": "Document title",
+                }
+            ),
+            "file": forms.FileInput(attrs={"class": "form-control-file"}),
+        }
+
+
 class SigningRequestForm(forms.ModelForm):
     signer = forms.ModelChoiceField(
         queryset=User.objects.none(),
-        required=True,
+        required=False,
+        label="Signer certificate owner",
     )
 
     class Meta:
@@ -34,17 +50,56 @@ class SigningRequestForm(forms.ModelForm):
 
     def __init__(self, *args, user=None, **kwargs):
         super().__init__(*args, **kwargs)
-        eligible_qs = User.objects.filter(
-            is_verified_identity=True,
-            certificate_profile__status="active",
-        ).distinct()
+        self.user = user
+        self.fields["signing_type"].empty_label = None
 
         if user is not None:
-            self.fields['document'].queryset = Document.objects.filter(owner=user, status=Document.Status.UPLOADED)
-            self.fields['signer'].queryset = eligible_qs
+            self.fields["document"].queryset = Document.objects.filter(
+                owner=user,
+                status=Document.Status.UPLOADED,
+            )
+
+            if user.role == User.Role.CITIZEN:
+                self.fields["signing_type"].choices = [
+                    (SigningRequest.SigningType.CLIENT, "Citizen client signature"),
+                ]
+                self.fields["signing_type"].initial = SigningRequest.SigningType.CLIENT
+                self.fields["signer"].queryset = User.objects.filter(pk=user.pk)
+                self.fields["signer"].initial = user
+                self.fields["signer"].widget = forms.HiddenInput()
+                self.fields["signer"].help_text = "Citizen signing uses your own certificate."
+            else:
+                eligible_qs = User.objects.filter(
+                    is_verified_identity=True,
+                    certificate_profile__status="active",
+                ).distinct()
+                self.fields["signer"].queryset = eligible_qs
+                self.fields["signing_type"].choices = [
+                    (SigningRequest.SigningType.REMOTE, "Officer administrative approval signature"),
+                    (SigningRequest.SigningType.CLIENT, "Client signature"),
+                ]
         else:
-            self.fields['signer'].queryset = eligible_qs
-        self.fields['signing_type'].empty_label = None
+            self.fields["signer"].queryset = User.objects.none()
+
+    def clean(self):
+        cleaned = super().clean()
+        user = getattr(self, "user", None)
+        if user is None:
+            return cleaned
+
+        if user.role == User.Role.CITIZEN:
+            if not user.is_verified_identity or not hasattr(user, "certificate_profile"):
+                raise forms.ValidationError(
+                    "Your identity must be verified and a certificate must be issued before signing."
+                )
+            if user.certificate_profile.status != "active":
+                raise forms.ValidationError(
+                    "Your identity must be verified and a certificate must be issued before signing."
+                )
+            cleaned["signer"] = user
+            cleaned["signing_type"] = SigningRequest.SigningType.CLIENT
+
+        return cleaned
 
 
 class CitizenRegistrationForm(forms.ModelForm):
