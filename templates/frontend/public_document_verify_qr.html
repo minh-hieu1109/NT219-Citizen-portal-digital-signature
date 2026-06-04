@@ -1,69 +1,151 @@
 {% extends "base.html" %}
 
 {% block content %}
-<h2>Document Verification</h2>
 
-<table class="table">
+<h2>Official Document Verification</h2>
+
+<div style="padding:12px; border:1px solid #0a0; background:#eaffea;">
+  <strong>Verification record found.</strong>
+  This page shows the official document information stored on the server.
+</div>
+
+<h3>Official document information</h3>
+
+<table border="1" cellpadding="8" cellspacing="0">
   <tr>
-    <th>Document</th>
+    <th>Title</th>
     <td>{{ document.title }}</td>
   </tr>
   <tr>
     <th>Owner</th>
+    <td>{{ document.owner.full_name|default:document.owner.email }}</td>
+  </tr>
+  <tr>
+    <th>Email</th>
     <td>{{ document.owner.email }}</td>
   </tr>
   <tr>
-    <th>Status</th>
-    <td>{{ document.status }}</td>
+    <th>Citizen ID</th>
+    <td>{{ document.owner.citizen_id|default:"-" }}</td>
+  </tr>
+  <tr>
+    <th>Form type</th>
+    <td>{{ document.form_type }}</td>
   </tr>
   <tr>
     <th>Verification ID</th>
-    <td>{{ verification_id }}</td>
+    <td><code>{{ verification_id }}</code></td>
   </tr>
+
+  {% if is_generated_form %}
+    <tr>
+      <th>Official final PDF SHA-256</th>
+      <td><code>{{ official_hash }}</code></td>
+    </tr>
+    <tr>
+      <th>Fingerprint</th>
+      <td><strong>{{ fingerprint }}</strong></td>
+    </tr>
+  {% endif %}
 </table>
 
-<h4>Signature Status</h4>
+<h3>Signature information</h3>
 
-<table class="table">
+<table border="1" cellpadding="8" cellspacing="0">
   <tr>
-    <th>Citizen Signature</th>
+    <th>Citizen signature</th>
     <td>
       {% if citizen_signature %}
-        VALID / Signed by {{ citizen_signature.signing_request.signer.email }}
-        <br>
-        Subject: {{ citizen_signature.certificate_subject }}
+        Signed by {{ citizen_signature.signing_request.signer.email }}
+        at {{ citizen_signature.signed_at|date:"Y-m-d H:i:s" }}
       {% else %}
-        Missing
+        Not found
       {% endif %}
     </td>
   </tr>
-
   <tr>
-    <th>Officer Signature</th>
+    <th>Officer approval signature</th>
     <td>
       {% if officer_signature %}
-        VALID / Signed by {{ officer_signature.signing_request.signer.email }}
-        <br>
-        Subject: {{ officer_signature.certificate_subject }}
+        Signed by {{ officer_signature.signing_request.signer.email }}
+        at {{ officer_signature.signed_at|date:"Y-m-d H:i:s" }}
       {% else %}
-        Missing
-      {% endif %}
-    </td>
-  </tr>
-
-  <tr>
-    <th>Final signed PDF</th>
-    <td>
-      {% if document.final_signed_pdf %}
-        Available
-        <br>
-        <a href="{{ document.final_signed_pdf.url }}">
-          Download final signed PDF
-        </a>
-      {% else %}
-        Not ready
+        Not found
       {% endif %}
     </td>
   </tr>
 </table>
+
+<h3>Anti-forgery warning</h3>
+
+<div style="padding: 12px; border: 1px solid #c00; background: #ffecec;">
+  <strong>Do not trust the QR code alone.</strong>
+  The QR code only opens the official verification record.
+  A generated form is trustworthy only if its visible content, Verification ID,
+  signer, signing time, and fingerprint match this page.
+</div>
+
+{% if is_generated_form %}
+  <h3>Upload generated form PDF to compare</h3>
+
+  {% if has_final_pdf %}
+    <p>
+      Upload the final signed generated-form PDF. The system will calculate
+      its SHA-256 hash and compare it with the official final signed PDF.
+    </p>
+
+    <form method="post" enctype="multipart/form-data">
+      {% csrf_token %}
+      <input type="file" name="uploaded_pdf" accept="application/pdf" required>
+      <button type="submit">Compare PDF</button>
+    </form>
+  {% else %}
+    <p>
+      The final signed PDF is not available yet. Please complete citizen and officer signing first.
+    </p>
+  {% endif %}
+
+  {% if compare_result %}
+    <h3>Comparison result</h3>
+
+    {% if compare_result.hash_match %}
+      <div style="padding: 12px; border: 1px solid #0a0; background: #eaffea;">
+        <strong>MATCH.</strong> {{ compare_result.message }}
+      </div>
+    {% else %}
+      <div style="padding: 12px; border: 1px solid #c00; background: #ffecec;">
+        <strong>MISMATCH.</strong> {{ compare_result.message }}
+      </div>
+    {% endif %}
+
+    <table border="1" cellpadding="8" cellspacing="0">
+      <tr>
+        <th>Official fingerprint</th>
+        <td>{{ compare_result.official_fingerprint }}</td>
+      </tr>
+      <tr>
+        <th>Uploaded fingerprint</th>
+        <td>{{ compare_result.uploaded_fingerprint }}</td>
+      </tr>
+      <tr>
+        <th>Official SHA-256</th>
+        <td><code>{{ compare_result.official_hash }}</code></td>
+      </tr>
+      <tr>
+        <th>Uploaded SHA-256</th>
+        <td><code>{{ compare_result.uploaded_hash }}</code></td>
+      </tr>
+    </table>
+  {% endif %}
+{% endif %}
+
+<h3>Anti-forgery warning</h3>
+
+<div style="padding:12px; border:1px solid #c00; background:#ffecec;">
+  <strong>Do not trust the QR code alone.</strong>
+  The QR code only opens the official verification record.
+  The document is trustworthy only if the visible content, owner, Verification ID,
+  signer, signing time, and fingerprint match this page.
+</div>
+
 {% endblock %}

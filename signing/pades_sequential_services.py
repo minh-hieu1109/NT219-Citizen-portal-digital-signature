@@ -9,7 +9,7 @@ from django.conf import settings
 from accounts.models import User, UserCertificate
 from signing.artifact_services import get_signature_artifact_dir
 from signing.pades_services import create_pades_signature
-
+from documents.services import calculate_sha256_path
 
 def _resolve_private_key_path(private_key_path):
     key_path = Path(private_key_path)
@@ -222,6 +222,7 @@ def create_sequential_pades_for_signature_record(signature_record):
 
         rel_path = output_pdf_path.relative_to(settings.MEDIA_ROOT)
 
+        # Sau mỗi lần ký, current_signed_pdf là bản mới nhất.
         document.current_signed_pdf.name = str(rel_path)
 
         update_fields = ["current_signed_pdf"]
@@ -229,6 +230,15 @@ def create_sequential_pades_for_signature_record(signature_record):
         if role_name == "officer":
             document.final_signed_pdf.name = str(rel_path)
             update_fields.append("final_signed_pdf")
+
+            # Chỉ áp dụng Mức 3 cho luồng 2: citizen tự điền form.
+            if document.form_type == "citizen_generated_form":
+                final_pdf_hash = calculate_sha256_path(output_pdf_path)
+
+                document.final_signed_pdf_sha256 = final_pdf_hash
+                update_fields.append("final_signed_pdf_sha256")
+
+                result["final_signed_pdf_sha256"] = final_pdf_hash
 
         document.save(update_fields=update_fields)
 

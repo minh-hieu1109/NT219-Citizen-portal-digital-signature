@@ -36,6 +36,11 @@ class Document(models.Model):
         null=True,
         blank=True,
     )
+    final_signed_pdf_sha256 = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+    )
     verification_id = models.UUIDField(
         default=uuid.uuid4,
         unique=True,

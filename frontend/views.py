@@ -34,6 +34,11 @@ from signing.artifact_services import get_signature_artifact_dir
 from documents.form_pdf_services import generate_citizen_form_pdf
 from .forms import CitizenGeneratedDocumentForm
 from django.core.files import File
+from documents.services import (
+    calculate_sha256,
+    calculate_uploaded_file_sha256,
+    short_fingerprint,
+)
 class OfficerAdminRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
     raise_exception = True
 
@@ -1257,17 +1262,17 @@ class CitizenGeneratedDocumentCreateView(LoginRequiredMixin, FormView):
         return redirect("signing-request-detail", pk=signing_request.pk)
     
 class PublicDocumentVerifyByQRView(View):
-    def get(self, request, verification_id):
-        document = get_object_or_404(
-            Document.objects.select_related("owner"),
-            verification_id=verification_id,
-        )
+    template_name = "frontend/public_document_verify_qr.html"
 
-        signatures = SignatureRecord.objects.filter(
-            signing_request__document=document
-        ).select_related(
-            "signing_request",
-            "signing_request__signer",
+    def build_context(self, document, compare_result=None):
+        signatures = (
+            SignatureRecord.objects.filter(signing_request__document=document)
+            .select_related(
+                "signing_request",
+                "signing_request__signer",
+                "signing_request__requested_by",
+            )
+            .order_by("signed_at")
         )
 
         citizen_signature = signatures.filter(
@@ -1279,18 +1284,76 @@ class PublicDocumentVerifyByQRView(View):
                 User.Role.OFFICER,
                 User.Role.ADMIN,
             ]
-        ).first()
+        ).last()
 
-        context = {
+        is_generated_form = document.form_type == "citizen_generated_form"
+
+        official_hash = ""
+        fingerprint = ""
+
+        if is_generated_form:
+            official_hash = document.final_signed_pdf_sha256 or document.sha256_hash
+            fingerprint = short_fingerprint(official_hash)
+
+        return {
             "document": document,
+            "verification_id": document.verification_id,
             "citizen_signature": citizen_signature,
             "officer_signature": officer_signature,
+            "is_generated_form": is_generated_form,
             "has_final_pdf": bool(document.final_signed_pdf),
-            "verification_id": verification_id,
+            "official_hash": official_hash,
+            "fingerprint": fingerprint,
+            "compare_result": compare_result,
         }
 
-        return render(
-            request,
-            "frontend/public_document_verify_qr.html",
-            context,
+    def get(self, request, verification_id):
+        document = get_object_or_404(
+            Document.objects.select_related("owner"),
+            verification_id=verification_id,
         )
+
+        context = self.build_context(document)
+        return render(request, self.template_name, context)
+
+    def post(self, request, verification_id):
+        document = get_object_or_404(
+            Document.objects.select_related("owner"),
+            verification_id=verification_id,
+        )
+
+        if document.form_type != "citizen_generated_form":
+            return HttpResponseForbidden(
+                "PDF hash comparison is only enabled for generated form documents."
+            )
+
+        uploaded_pdf = request.FILES.get("uploaded_pdf")
+
+        if not uploaded_pdf:
+            compare_result = {
+                "hash_match": False,
+                "message": "Please upload a PDF file.",
+            }
+            context = self.build_context(document, compare_result)
+            return render(request, self.template_name, context)
+
+        uploaded_hash = calculate_sha256(uploaded_pdf)
+        official_hash = document.final_signed_pdf_sha256 or document.sha256_hash
+
+        hash_match = uploaded_hash == official_hash
+
+        compare_result = {
+            "hash_match": hash_match,
+            "message": (
+                "Uploaded PDF matches the official final signed form."
+                if hash_match
+                else "Uploaded PDF does not match the official final signed form. It may be modified or forged."
+            ),
+            "uploaded_hash": uploaded_hash,
+            "official_hash": official_hash,
+            "uploaded_fingerprint": short_fingerprint(uploaded_hash),
+            "official_fingerprint": short_fingerprint(official_hash),
+        }
+
+        context = self.build_context(document, compare_result)
+        return render(request, self.template_name, context)

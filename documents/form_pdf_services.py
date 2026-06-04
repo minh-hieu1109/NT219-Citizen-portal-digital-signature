@@ -53,12 +53,21 @@ def generate_citizen_form_pdf(document, citizen, form_data):
     c.rect(330, 80, 220, 80)
 
     # QR verify
-    c.setFont("Helvetica-Bold", 10)
-    c.drawString(50, 45, "Scan QR to verify this document:")
-    c.drawImage(str(qr_path), 210, 25, width=70, height=70)
+    check_code = str(document.verification_id).replace("-", "").upper()[:12]
+    check_code = "-".join(check_code[i:i + 4] for i in range(0, len(check_code), 4))
 
-    c.setFont("Helvetica", 8)
-    c.drawString(290, 55, verify_url[:90])
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(50, 55, "Official verification")
+
+    c.drawImage(str(qr_path), 50, 70, width=80, height=80)
+
+    c.setFont("Helvetica-Bold", 8)
+    c.drawString(145, 125, "Scan QR to verify this document")
+
+    c.setFont("Helvetica", 7)
+    c.drawString(145, 110, f"Verification ID: {document.verification_id}")
+    c.drawString(145, 98, f"Check code: {check_code}")
+    c.drawString(145, 86, "Compare this page with the official verify page.")
 
     c.showPage()
     c.save()

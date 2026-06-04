@@ -7,8 +7,59 @@
 
 <div class="card">
     <p><strong>Title:</strong> {{ document.title }}</p>
-    <p><strong>File:</strong> {% if document.file %}<a href="{{ document.file.url }}">{{ document.file.name }}</a>{% else %}-{% endif %}</p>
-    <p><strong>SHA-256:</strong> <span class="mono">{{ document.sha256_hash|default:'-' }}</span></p>
+
+    {% if document.form_type == "citizen_generated_form" %}
+        {% if document.final_signed_pdf %}
+            <p>
+                <strong>Final signed PDF:</strong>
+                <a class="button small"
+                   href="{{ document.final_signed_pdf.url }}"
+                   target="_blank"
+                   rel="noopener"
+                   download>
+                    Download final signed PDF
+                </a>
+            </p>
+
+            <p>
+                <strong>Final signed PDF SHA-256:</strong>
+                <span class="mono">{{ document.final_signed_pdf_sha256|default:'-' }}</span>
+            </p>
+        {% else %}
+            <p>
+                <strong>Final signed PDF:</strong>
+                Not available yet. Citizen and officer must sign first.
+            </p>
+        {% endif %}
+    {% endif %}
+
+    <p>
+        <strong>
+            {% if document.form_type == "citizen_generated_form" %}
+                Generated form PDF:
+            {% else %}
+                Uploaded file:
+            {% endif %}
+        </strong>
+
+        {% if document.file %}
+            <a class="button small"
+               href="{{ document.file.url }}"
+               target="_blank"
+               rel="noopener"
+               download>
+                Download original PDF
+            </a>
+        {% else %}
+            -
+        {% endif %}
+    </p>
+
+    <p>
+        <strong>Original SHA-256:</strong>
+        <span class="mono">{{ document.sha256_hash|default:'-' }}</span>
+    </p>
+
     <p><strong>Owner:</strong> {{ document.owner.email }}</p>
     <p><strong>Status:</strong> {{ document.get_status_display }}</p>
     <p><strong>Created:</strong> {{ document.uploaded_at|date:'Y-m-d H:i:s' }}</p>
@@ -16,34 +67,50 @@
 
 <div class="card">
     <h3>Related Signatures</h3>
+
     {% if signature_records %}
-    <table class="table">
-        <thead><tr><th>ID</th><th>Request</th><th>Signed At</th><th>Algorithm</th><th>Verify</th></tr></thead>
-        <tbody>
-        {% for sig in signature_records %}
-        <tr>
-            <td>{{ sig.id }}</td>
-            <td><a href="{% url 'signing-request-detail' sig.signing_request.id %}">#{{ sig.signing_request.id }}</a></td>
-            <td>{{ sig.signed_at|date:'Y-m-d H:i:s' }}</td>
-            <td>{{ sig.algorithm }}</td>
-            <td>
-                <form method="post" action="{% url 'verify-signature' sig.id %}">
-                    {% csrf_token %}
-                    <button class="button small" type="submit">Verify</button>
-                </form>
-            </td>
-        </tr>
-        {% endfor %}
-        </tbody>
-    </table>
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Request</th>
+                    <th>Signed At</th>
+                    <th>Algorithm</th>
+                    <th>Verify</th>
+                </tr>
+            </thead>
+
+            <tbody>
+                {% for sig in signature_records %}
+                    <tr>
+                        <td>{{ sig.id }}</td>
+                        <td>
+                            <a href="{% url 'signing-request-detail' sig.signing_request.id %}">
+                                #{{ sig.signing_request.id }}
+                            </a>
+                        </td>
+                        <td>{{ sig.signed_at|date:'Y-m-d H:i:s' }}</td>
+                        <td>{{ sig.algorithm }}</td>
+                        <td>
+                            <form method="post" action="{% url 'verify-signature' sig.id %}">
+                                {% csrf_token %}
+                                <button class="button small" type="submit">Verify</button>
+                            </form>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
     {% else %}
-    <p>No signatures yet.</p>
+        <p>No signatures yet.</p>
     {% endif %}
 </div>
 
-<div class="actions"><a class="button" href="{% url 'document-list' %}">Back</a></div>
+<div class="actions">
+    <a class="button" href="{% url 'document-list' %}">Back</a>
 
-<a href="{% url 'download-full-document-verification-package' document.id %}">
-    Download Full Verification Package
-</a>
+    <a class="button" href="{% url 'download-full-document-verification-package' document.id %}">
+        Download full verification package
+    </a>
+</div>
 {% endblock %}
