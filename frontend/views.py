@@ -34,6 +34,7 @@ from signing.artifact_services import get_signature_artifact_dir
 from documents.form_pdf_services import generate_citizen_form_pdf
 from .forms import CitizenGeneratedDocumentForm
 from django.core.files import File
+from accounts.revocation_services import revoke_user_certificate
 from documents.services import (
     calculate_sha256,
     calculate_uploaded_file_sha256,
@@ -504,16 +505,19 @@ class RAPendingListView(OfficerAdminRequiredMixin, ListView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+
         context["verified_without_cert_users"] = (
             User.objects.filter(is_verified_identity=True)
-            .exclude(certificate_profile__status="active")
+            .filter(certificate_profile__isnull=True)
             .order_by("-created_at")
         )
-        context["active_cert_users"] = (
-            User.objects.filter(certificate_profile__status="active")
+
+        context["cert_users"] = (
+            User.objects.filter(certificate_profile__isnull=False)
             .select_related("certificate_profile")
             .order_by("-created_at")
         )
+
         return context
 
 
@@ -530,10 +534,14 @@ class RAActionView(OfficerAdminRequiredMixin, View):
             from accounts.services import issue_certificate_for_user
 
             if target_user.role == User.Role.CITIZEN and not target_user.is_verified_identity:
-                messages.error(request, "Citizen identity must be verified before certificate issuance.")
+                messages.error(
+                    request,
+                    "Citizen identity must be verified before certificate issuance."
+                )
                 return redirect("ra-pending")
 
             user_cert = issue_certificate_for_user(target_user)
+
             AuditLog.objects.create(
                 user=request.user,
                 action=AuditLog.Action.CERTIFICATE_ISSUED,
@@ -541,7 +549,43 @@ class RAActionView(OfficerAdminRequiredMixin, View):
                 object_id=user_cert.id,
                 detail={"target_user_email": target_user.email},
             )
+
             messages.success(request, "Certificate issued.")
+            return redirect("ra-pending")
+
+        if action == "revoke":
+            user_cert = getattr(target_user, "certificate_profile", None)
+
+            if not user_cert:
+                messages.error(request, "This user does not have a certificate.")
+                return redirect("ra-pending")
+
+            if user_cert.status == UserCertificate.Status.REVOKED:
+                messages.warning(request, "This certificate is already revoked.")
+                return redirect("ra-pending")
+
+            try:
+                crl_path = revoke_user_certificate(user_cert)
+            except Exception as exc:
+                messages.error(request, f"Certificate revoke failed: {exc}")
+                return redirect("ra-pending")
+
+            AuditLog.objects.create(
+                user=request.user,
+                action="certificate_revoked",
+                object_type="UserCertificate",
+                object_id=user_cert.id,
+                detail={
+                    "target_user_email": target_user.email,
+                    "certificate_serial": user_cert.certificate_serial,
+                    "crl_path": str(crl_path),
+                },
+            )
+
+            messages.success(
+                request,
+                "Certificate revoked and lab CRL regenerated."
+            )
             return redirect("ra-pending")
 
         if action not in self.action_map:
@@ -556,16 +600,43 @@ class RAActionView(OfficerAdminRequiredMixin, View):
             if action == "verify"
             else AuditLog.Action.IDENTITY_REJECTED
         )
+
         AuditLog.objects.create(
             user=request.user,
             action=audit_action,
             object_type="User",
             object_id=target_user.id,
-            detail={"target_user_email": target_user.email, "is_verified_identity": target_user.is_verified_identity},
+            detail={
+                "target_user_email": target_user.email,
+                "is_verified_identity": target_user.is_verified_identity,
+            },
         )
 
         messages.success(request, msg)
         return redirect("ra-pending")
+
+        # if action not in self.action_map:
+        #     return HttpResponseForbidden("Unsupported action")
+
+        # field, value, msg = self.action_map[action]
+        # setattr(target_user, field, value)
+        # target_user.save(update_fields=[field])
+
+        # audit_action = (
+        #     AuditLog.Action.IDENTITY_VERIFIED
+        #     if action == "verify"
+        #     else AuditLog.Action.IDENTITY_REJECTED
+        # )
+        # AuditLog.objects.create(
+        #     user=request.user,
+        #     action=audit_action,
+        #     object_type="User",
+        #     object_id=target_user.id,
+        #     detail={"target_user_email": target_user.email, "is_verified_identity": target_user.is_verified_identity},
+        # )
+
+        # messages.success(request, msg)
+        # return redirect("ra-pending")
 
 
 class AuditLogListView(OfficerAdminRequiredMixin, ListView):

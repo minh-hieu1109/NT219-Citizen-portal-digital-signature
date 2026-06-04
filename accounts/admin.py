@@ -1,7 +1,8 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 from .models import User, UserCertificate
-
+from django.contrib import messages
+from .revocation_services import revoke_user_certificate
 
 @admin.register(User)
 class CustomUserAdmin(UserAdmin):
@@ -57,6 +58,22 @@ class CustomUserAdmin(UserAdmin):
 
     search_fields = ("email", "full_name", "citizen_id")
 
+@admin.action(description="Revoke selected certificates and regenerate CRL")
+def revoke_certificates(modeladmin, request, queryset):
+    count = 0
+
+    for cert in queryset:
+        try:
+            revoke_user_certificate(cert)
+            count += 1
+        except Exception as e:
+            messages.error(request, f"{cert.user.email}: {e}")
+
+    messages.success(
+        request,
+        f"Revoked {count} certificate(s) and regenerated CRL."
+    )
+
 @admin.register(UserCertificate)
 class UserCertificateAdmin(admin.ModelAdmin):
     list_display = (
@@ -77,3 +94,5 @@ class UserCertificateAdmin(admin.ModelAdmin):
         "pkcs11_key_label",
     )
     list_filter = ("status", "key_storage_type")
+    actions = [revoke_certificates]
+

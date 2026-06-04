@@ -15,13 +15,170 @@ from signing.cms_services import verify_cms_detached_signature
 from verification.crl_utils import is_cert_revoked_in_crl
 from verification.ocsp_services import check_certificate_ocsp_status
 from signing.pades_services import verify_pades_signature
-
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.serialization import Encoding
+from accounts.models import UserCertificate
 def _save_upload(uploaded_file, suffix=""):
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         for chunk in uploaded_file.chunks():
             tmp.write(chunk)
         return Path(tmp.name)
 
+def apply_public_certificate_policy(result: dict) -> dict:
+    """
+    Tách rõ:
+    - signature_valid: chữ ký đúng về mặt mật mã
+    - status/ok: kết quả tin cậy cuối cùng sau khi check cert/revoke
+    """
+    signature_ok = bool(result.get("signature_valid") or result.get("ok"))
+
+    trusted = result.get("certificate_trusted_by_lab_ca")
+    revoked = result.get("certificate_revoked_crl")
+    ocsp_status = result.get("ocsp_status")
+
+    trusted_ok = trusted is not False
+    revoked_bad = revoked is True or ocsp_status == "revoked"
+
+    final_ok = signature_ok and trusted_ok and not revoked_bad
+
+    result["ok"] = final_ok
+    result["status"] = "valid" if final_ok else "invalid"
+
+    if revoked_bad:
+        old = result.get("message", "")
+        result["message"] = (
+            old + " Certificate is revoked, so the overall result is INVALID."
+        ).strip()
+
+    return result
+
+
+def _extract_certificates_from_cms(cms_signature_path, document_path=None):
+    certs = []
+
+    for inform in ["DER", "PEM", "SMIME"]:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pem") as tmp:
+            certs_out = Path(tmp.name)
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".out") as tmp:
+            verified_out = Path(tmp.name)
+
+        try:
+            cmd = [
+                str(settings.PKI_OPENSSL_BIN),
+                "cms",
+                "-verify",
+                "-inform",
+                inform,
+                "-in",
+                str(cms_signature_path),
+                "-noverify",
+                "-certsout",
+                str(certs_out),
+                "-out",
+                str(verified_out),
+            ]
+
+            if document_path:
+                cmd.extend([
+                    "-content",
+                    str(document_path),
+                    "-binary",
+                ])
+
+            subprocess.run(cmd, capture_output=True, text=True)
+
+            pem_data = certs_out.read_text(
+                encoding="utf-8",
+                errors="ignore",
+            )
+
+            if "BEGIN CERTIFICATE" in pem_data:
+                blocks = pem_data.split("-----END CERTIFICATE-----")
+                for block in blocks:
+                    if "-----BEGIN CERTIFICATE-----" in block:
+                        pem = block + "-----END CERTIFICATE-----\n"
+                        certs.append(
+                            x509.load_pem_x509_certificate(
+                                pem.encode("utf-8")
+                            )
+                        )
+
+                if certs:
+                    return certs
+
+        finally:
+            certs_out.unlink(missing_ok=True)
+            verified_out.unlink(missing_ok=True)
+
+    return certs
+
+
+def _pick_signer_certificate(certs):
+    if not certs:
+        return None
+
+    for cert in certs:
+        if cert.subject != cert.issuer:
+            return cert
+
+    return certs[0]
+
+
+def _extract_pades_sha256_fingerprint(details: str):
+    match = re.search(
+        r"Certificate SHA256 fingerprint:\s*([0-9a-fA-F]+)",
+        details or "",
+    )
+
+    if not match:
+        return None
+
+    return match.group(1).lower()
+
+
+def _find_user_certificate_by_sha256_fingerprint(fingerprint: str):
+    if not fingerprint:
+        return None
+
+    for user_cert in UserCertificate.objects.all():
+        if not user_cert.certificate_pem:
+            continue
+
+        cert = x509.load_pem_x509_certificate(user_cert.certificate_pem.encode("utf-8"))
+        current_fp = cert.fingerprint(hashes.SHA256()).hex().lower()
+
+        if current_fp == fingerprint.lower():
+            return user_cert
+
+    return None
+
+
+def _enrich_pades_result_with_revocation(result: dict) -> dict:
+    details = result.get("pades_details", "")
+    fingerprint = _extract_pades_sha256_fingerprint(details)
+    user_cert = _find_user_certificate_by_sha256_fingerprint(fingerprint)
+
+    if not user_cert:
+        return result
+
+    cert = x509.load_pem_x509_certificate(user_cert.certificate_pem.encode("utf-8"))
+    cert_checks = _basic_certificate_checks(cert)
+
+    result.update(cert_checks)
+
+    revoked_by_db = user_cert.status == UserCertificate.Status.REVOKED
+    revoked_by_crl = cert_checks.get("certificate_revoked_crl") is True
+
+    result["certificate_revoked_crl"] = bool(revoked_by_db or revoked_by_crl)
+
+    if revoked_by_db:
+        result["warning"] = (
+            result.get("warning", "")
+            + " Certificate is marked revoked in local certificate database."
+        ).strip()
+
+    return result
 
 def _basic_certificate_checks(cert):
     result = {
@@ -136,65 +293,6 @@ def verify_public_raw_signature(document_file, signature_file, certificate_file)
             "message": str(exc),
         }
 
-def _extract_certificates_from_cms(cms_signature_path):
-    """
-    Extract signer certificates embedded in CMS/CAdES .p7s.
-    Returns list of cryptography.x509.Certificate.
-    """
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pem") as tmp:
-        certs_out = Path(tmp.name)
-
-    try:
-        cmd = [
-            str(settings.PKI_OPENSSL_BIN),
-            "cms",
-            "-verify",
-            "-inform",
-            "DER",
-            "-in",
-            str(cms_signature_path),
-            "-noverify",
-            "-certsout",
-            str(certs_out),
-            "-out",
-            "/dev/null",
-        ]
-
-        proc = subprocess.run(cmd, capture_output=True, text=True)
-
-        # Với detached CMS, lệnh trên có thể fail vì thiếu -content,
-        # nhưng nhiều bản OpenSSL vẫn ghi certsout được. Nếu chưa có cert thì dùng fallback.
-        pem_data = certs_out.read_text(encoding="utf-8", errors="ignore")
-
-        if "BEGIN CERTIFICATE" not in pem_data:
-            cmd = [
-                str(settings.PKI_OPENSSL_BIN),
-                "pkcs7",
-                "-inform",
-                "DER",
-                "-in",
-                str(cms_signature_path),
-                "-print_certs",
-            ]
-            proc = subprocess.run(cmd, capture_output=True, text=True)
-            pem_data = proc.stdout or ""
-
-        certs = []
-        blocks = pem_data.split("-----END CERTIFICATE-----")
-        for block in blocks:
-            if "-----BEGIN CERTIFICATE-----" in block:
-                pem = block + "-----END CERTIFICATE-----\n"
-                certs.append(x509.load_pem_x509_certificate(pem.encode("utf-8")))
-
-        return certs
-
-    finally:
-        try:
-            if certs_out.exists():
-                certs_out.unlink()
-        except Exception:
-            pass
-
 
 def _pick_signer_certificate(certs):
     """
@@ -211,12 +309,6 @@ def _pick_signer_certificate(certs):
     return certs[0]
 
 def verify_public_cms_detached(document_file, cms_signature_file):
-    """
-    CAdES/CMS detached mode:
-    - document_file: original file
-    - cms_signature_file: .p7s detached signature
-    """
-
     document_path = None
     signature_path = None
 
@@ -224,7 +316,7 @@ def verify_public_cms_detached(document_file, cms_signature_file):
         document_path = _save_upload(document_file, suffix=".document")
         signature_path = _save_upload(cms_signature_file, suffix=".p7s")
 
-        result = verify_cms_detached_signature(
+        cms_result = verify_cms_detached_signature(
             input_file=str(document_path),
             cms_signature_path=str(signature_path),
             ca_cert_path=str(settings.PKI_ROOT_CA_CERT),
@@ -244,7 +336,7 @@ def verify_public_cms_detached(document_file, cms_signature_file):
         }
 
         try:
-            certs = _extract_certificates_from_cms(signature_path)
+            certs = _extract_certificates_from_cms(signature_path, document_path)
             signer_cert = _pick_signer_certificate(certs)
 
             if signer_cert:
@@ -258,24 +350,27 @@ def verify_public_cms_detached(document_file, cms_signature_file):
                 cert_info["signer_common_name"] = cn_attrs[0].value if cn_attrs else "-"
 
         except Exception as exc:
-            cert_info["certificate_extract_warning"] = str(exc)
+            cert_info["warning"] = f"Could not extract signer certificate: {exc}"
 
-        return {
+        public_result = {
             "mode": "CAdES/CMS detached",
-            "ok": bool(result.get("ok")),
-            "status": result.get("status", "invalid"),
-            "signature_valid": bool(result.get("ok")),
-            "verification_mode": result.get("verification_mode", ""),
-            "message": result.get("message", ""),
-            "warning": result.get("warning", ""),
+            "ok": bool(cms_result.get("ok")),
+            "status": "valid" if cms_result.get("ok") else "invalid",
+            "signature_valid": bool(cms_result.get("ok")),
+            "verification_mode": cms_result.get("verification_mode", ""),
+            "message": cms_result.get("message", ""),
+            "warning": cms_result.get("warning", ""),
             **cert_info,
         }
+
+        return apply_public_certificate_policy(public_result)
 
     except Exception as exc:
         return {
             "mode": "CAdES/CMS detached",
             "ok": False,
             "status": "error",
+            "signature_valid": False,
             "message": str(exc),
         }
 
@@ -315,34 +410,40 @@ def _parse_pades_details(details):
     }
 
 def verify_public_pades(signed_pdf_file):
-    """
-    PAdES mode:
-    - signed_pdf_file: signed PDF with embedded signature.
-    """
-
     signed_pdf_path = None
 
     try:
         signed_pdf_path = _save_upload(signed_pdf_file, suffix=".pdf")
 
-        result = verify_pades_signature(
+        pades_result = verify_pades_signature(
             signed_pdf_path=str(signed_pdf_path),
             ca_cert_path=str(settings.PKI_ROOT_CA_CERT),
         )
 
-        details = result.get("details", "")
+        details = (
+            pades_result.get("details")
+            or pades_result.get("pades_details")
+            or pades_result.get("stdout")
+            or pades_result.get("output")
+            or ""
+        )
+
         pades_cert_info = _parse_pades_details(details)
 
-        return {
+        public_result = {
             "mode": "PAdES signed PDF",
-            "ok": bool(result.get("ok")),
-            "status": result.get("status", "invalid"),
-            "signature_valid": bool(result.get("ok")),
-            "message": result.get("message", ""),
-            "warning": "",
+            "ok": bool(pades_result.get("ok")),
+            "status": "valid" if pades_result.get("ok") else "invalid",
+            "signature_valid": bool(pades_result.get("ok")),
+            "message": pades_result.get("message", ""),
+            "warning": pades_result.get("warning", ""),
             "pades_details": details,
             **pades_cert_info,
         }
+
+        public_result = _enrich_pades_result_with_revocation(public_result)
+
+        return apply_public_certificate_policy(public_result)
 
     except Exception as exc:
         return {

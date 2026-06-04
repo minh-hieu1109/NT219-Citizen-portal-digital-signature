@@ -1,46 +1,96 @@
-import subprocess
+from datetime import datetime, timedelta, timezone as dt_timezone
 from pathlib import Path
+
 from django.conf import settings
+from django.utils import timezone
+
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+
 from accounts.models import UserCertificate
 
-def run_cmd(cmd: list[str]) -> None:
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"Command failed: {' '.join(cmd)}\n"
-            f"STDOUT:\n{result.stdout}\n"
-            f"STDERR:\n{result.stderr}"
+
+def _load_lab_ca():
+    with open(settings.PKI_ROOT_CA_CERT, "rb") as f:
+        ca_cert = x509.load_pem_x509_certificate(f.read())
+
+    with open(settings.PKI_ROOT_CA_KEY, "rb") as f:
+        ca_key = serialization.load_pem_private_key(
+            f.read(),
+            password=None,
         )
 
-def revoke_user_certificate(user_cert: UserCertificate) -> None:
-    if user_cert.status == UserCertificate.Status.REVOKED:
-        return
+    return ca_cert, ca_key
 
-    openssl_bin = str(settings.PKI_OPENSSL_BIN)
-    openssl_ca_cnf = str(settings.PKI_OPENSSL_CA_CNF)
 
-    cert_path = Path(settings.PKI_USER_CERT_DIR) / f"user_{user_cert.user.id}.crt"
-    crl_path = Path(settings.PKI_CRL_DIR) / "lab_ca.crl.pem"
+def regenerate_lab_crl() -> Path:
+    """
+    Generate lab CRL from DB state.
 
-    if not cert_path.exists():
-        raise RuntimeError(f"Certificate file not found: {cert_path}")
+    This is suitable for the current PoC because user certificates are issued
+    and stored by the Django app, not always tracked by OpenSSL CA index.txt.
+    """
+    ca_cert, ca_key = _load_lab_ca()
 
-    run_cmd([
-        openssl_bin,
-        "ca",
-        "-config", openssl_ca_cnf,
-        "-revoke", str(cert_path),
-        "-batch",
-    ])
+    now = datetime.now(dt_timezone.utc)
+    next_update = now + timedelta(days=30)
 
-    run_cmd([
-        openssl_bin,
-        "ca",
-        "-config", openssl_ca_cnf,
-        "-gencrl",
-        "-out", str(crl_path),
-        "-batch",
-    ])
+    builder = (
+        x509.CertificateRevocationListBuilder()
+        .issuer_name(ca_cert.subject)
+        .last_update(now)
+        .next_update(next_update)
+        .add_extension(
+            x509.CRLNumber(int(now.timestamp())),
+            critical=False,
+        )
+    )
 
-    user_cert.status = UserCertificate.Status.REVOKED
-    user_cert.save(update_fields=["status"])
+    revoked_profiles = UserCertificate.objects.filter(
+        status=UserCertificate.Status.REVOKED
+    )
+
+    for profile in revoked_profiles:
+        cert = x509.load_pem_x509_certificate(
+            profile.certificate_pem.encode("utf-8")
+        )
+
+        revoked_cert = (
+            x509.RevokedCertificateBuilder()
+            .serial_number(cert.serial_number)
+            .revocation_date(now)
+            .add_extension(
+                x509.CRLReason(x509.ReasonFlags.key_compromise),
+                critical=False,
+            )
+            .build()
+        )
+
+        builder = builder.add_revoked_certificate(revoked_cert)
+
+    crl = builder.sign(
+        private_key=ca_key,
+        algorithm=hashes.SHA256(),
+    )
+
+    crl_dir = Path(settings.PKI_CRL_DIR)
+    crl_dir.mkdir(parents=True, exist_ok=True)
+
+    crl_path = crl_dir / "lab_ca.crl.pem"
+    crl_path.write_bytes(crl.public_bytes(serialization.Encoding.PEM))
+
+    return crl_path
+
+
+def revoke_user_certificate(user_cert: UserCertificate) -> Path:
+    """
+    Revoke certificate and regenerate lab CRL.
+
+    Revoke means permanent revocation. Do not set it back to active.
+    If user needs to sign again, issue a new certificate.
+    """
+    if user_cert.status != UserCertificate.Status.REVOKED:
+        user_cert.status = UserCertificate.Status.REVOKED
+        user_cert.save(update_fields=["status"])
+
+    return regenerate_lab_crl()
