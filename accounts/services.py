@@ -7,7 +7,7 @@ from cryptography.x509.oid import NameOID
 from pathlib import Path
 from typing import Optional
 from .models import UserCertificate
-from .pkcs11_utils import create_user_keypair_in_softhsm, load_public_key_from_softhsm
+from .pkcs11_utils import create_user_keypair_in_softhsm, load_public_key_from_softhsm, import_certificate_to_softhsm
 import subprocess
 import tempfile
 
@@ -83,7 +83,7 @@ def issue_certificate_for_user(user) -> UserCertificate:
     cert_path = user_cert_dir / f"user_{user.id}.crt"
     cert_path.write_text(cert_pem, encoding="utf-8")
 
-    return UserCertificate.objects.create(
+    user_cert = UserCertificate.objects.create(
         user=user,
         certificate_pem=cert_pem,
         certificate_subject=cert.subject.rfc4514_string(),
@@ -98,6 +98,13 @@ def issue_certificate_for_user(user) -> UserCertificate:
         valid_to=cert.not_valid_after_utc,
         status=UserCertificate.Status.ACTIVE,
     )
+
+    try:
+        import_certificate_to_softhsm(user_cert)
+    except Exception:
+        pass
+
+    return user_cert
 
 def issue_certificate_from_csr_for_user(
     user,

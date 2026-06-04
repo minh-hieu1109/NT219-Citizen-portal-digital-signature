@@ -1,5 +1,6 @@
 import base64
 import tempfile
+import subprocess
 from pathlib import Path
 from datetime import datetime, timezone
 import re
@@ -8,6 +9,7 @@ from cryptography import x509
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.x509.oid import NameOID
 
 from signing.cms_services import verify_cms_detached_signature
 from verification.crl_utils import is_cert_revoked_in_crl
@@ -134,6 +136,79 @@ def verify_public_raw_signature(document_file, signature_file, certificate_file)
             "message": str(exc),
         }
 
+def _extract_certificates_from_cms(cms_signature_path):
+    """
+    Extract signer certificates embedded in CMS/CAdES .p7s.
+    Returns list of cryptography.x509.Certificate.
+    """
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pem") as tmp:
+        certs_out = Path(tmp.name)
+
+    try:
+        cmd = [
+            str(settings.PKI_OPENSSL_BIN),
+            "cms",
+            "-verify",
+            "-inform",
+            "DER",
+            "-in",
+            str(cms_signature_path),
+            "-noverify",
+            "-certsout",
+            str(certs_out),
+            "-out",
+            "/dev/null",
+        ]
+
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+
+        # Với detached CMS, lệnh trên có thể fail vì thiếu -content,
+        # nhưng nhiều bản OpenSSL vẫn ghi certsout được. Nếu chưa có cert thì dùng fallback.
+        pem_data = certs_out.read_text(encoding="utf-8", errors="ignore")
+
+        if "BEGIN CERTIFICATE" not in pem_data:
+            cmd = [
+                str(settings.PKI_OPENSSL_BIN),
+                "pkcs7",
+                "-inform",
+                "DER",
+                "-in",
+                str(cms_signature_path),
+                "-print_certs",
+            ]
+            proc = subprocess.run(cmd, capture_output=True, text=True)
+            pem_data = proc.stdout or ""
+
+        certs = []
+        blocks = pem_data.split("-----END CERTIFICATE-----")
+        for block in blocks:
+            if "-----BEGIN CERTIFICATE-----" in block:
+                pem = block + "-----END CERTIFICATE-----\n"
+                certs.append(x509.load_pem_x509_certificate(pem.encode("utf-8")))
+
+        return certs
+
+    finally:
+        try:
+            if certs_out.exists():
+                certs_out.unlink()
+        except Exception:
+            pass
+
+
+def _pick_signer_certificate(certs):
+    """
+    Pick end-entity signer cert, not Root CA.
+    """
+    if not certs:
+        return None
+
+    # Ưu tiên cert không phải self-signed/root
+    for cert in certs:
+        if cert.subject != cert.issuer:
+            return cert
+
+    return certs[0]
 
 def verify_public_cms_detached(document_file, cms_signature_file):
     """
@@ -155,6 +230,36 @@ def verify_public_cms_detached(document_file, cms_signature_file):
             ca_cert_path=str(settings.PKI_ROOT_CA_CERT),
         )
 
+        cert_info = {
+            "certificate_subject": "-",
+            "certificate_issuer": "-",
+            "certificate_serial": "-",
+            "certificate_time_valid": None,
+            "certificate_trusted_by_lab_ca": None,
+            "certificate_revoked_crl": None,
+            "ocsp_status": "-",
+            "ocsp_message": "",
+            "signer_email": "-",
+            "signer_common_name": "-",
+        }
+
+        try:
+            certs = _extract_certificates_from_cms(signature_path)
+            signer_cert = _pick_signer_certificate(certs)
+
+            if signer_cert:
+                cert_info.update(_basic_certificate_checks(signer_cert))
+
+                attrs = signer_cert.subject
+                email_attrs = attrs.get_attributes_for_oid(x509.NameOID.EMAIL_ADDRESS)
+                cn_attrs = attrs.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
+
+                cert_info["signer_email"] = email_attrs[0].value if email_attrs else "-"
+                cert_info["signer_common_name"] = cn_attrs[0].value if cn_attrs else "-"
+
+        except Exception as exc:
+            cert_info["certificate_extract_warning"] = str(exc)
+
         return {
             "mode": "CAdES/CMS detached",
             "ok": bool(result.get("ok")),
@@ -163,13 +268,7 @@ def verify_public_cms_detached(document_file, cms_signature_file):
             "verification_mode": result.get("verification_mode", ""),
             "message": result.get("message", ""),
             "warning": result.get("warning", ""),
-            "certificate_subject": "-",
-            "certificate_issuer": "-",
-            "certificate_serial": "-",
-            "certificate_time_valid": None,
-            "certificate_trusted_by_lab_ca": None,
-            "certificate_revoked_crl": None,
-            "ocsp_status": "-",
+            **cert_info,
         }
 
     except Exception as exc:

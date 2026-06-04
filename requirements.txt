@@ -9,3 +9,4 @@ asn1crypto
 requests
 pyHanko
 pyhanko-cli
+pyHanko[pkcs11]

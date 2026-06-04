@@ -42,4 +42,8 @@
 </div>
 
 <div class="actions"><a class="button" href="{% url 'document-list' %}">Back</a></div>
+
+<a href="{% url 'download-full-document-verification-package' document.id %}">
+    Download Full Verification Package
+</a>
 {% endblock %}

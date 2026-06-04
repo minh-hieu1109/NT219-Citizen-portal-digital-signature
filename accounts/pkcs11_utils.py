@@ -1,6 +1,11 @@
 from django.conf import settings
 from cryptography.hazmat.primitives.asymmetric import rsa
+import subprocess
+import tempfile
+from pathlib import Path
 
+from cryptography import x509
+from cryptography.hazmat.primitives import serialization
 
 def _require_pkcs11():
     try:
@@ -92,3 +97,80 @@ def load_public_key_from_softhsm(key_label: str):
             int.from_bytes(modulus, "big"),
         )
         return public_numbers.public_key()
+    
+def import_certificate_to_softhsm(user_cert):
+    """
+    Import user's X.509 certificate into SoftHSM so pyHanko PKCS#11
+    can find cert-label + key-label in the token.
+    """
+    if user_cert.key_storage_type != user_cert.KeyStorageType.SOFTHSM:
+        return {
+            "ok": False,
+            "message": "Certificate profile is not SoftHSM-backed.",
+        }
+
+    if not user_cert.pkcs11_key_label or not user_cert.pkcs11_key_id:
+        return {
+            "ok": False,
+            "message": "Missing pkcs11_key_label or pkcs11_key_id.",
+        }
+
+    cert = x509.load_pem_x509_certificate(
+        user_cert.certificate_pem.encode("utf-8")
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cert_der_path = Path(tmpdir) / "signer_cert.der"
+        cert_der_path.write_bytes(
+            cert.public_bytes(serialization.Encoding.DER)
+        )
+
+        cmd = [
+            "pkcs11-tool",
+            "--module",
+            str(settings.PKCS11_LIB_PATH),
+            "--token-label",
+            user_cert.pkcs11_token_label or settings.PKCS11_TOKEN_LABEL,
+            "--login",
+            "--pin",
+            settings.PKCS11_TOKEN_PIN,
+            "--write-object",
+            str(cert_der_path),
+            "--type",
+            "cert",
+            "--label",
+            user_cert.pkcs11_key_label,
+            "--id",
+            user_cert.pkcs11_key_id,
+        ]
+
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+
+        if proc.returncode != 0:
+            # Fallback: some pkcs11-tool versions may not like --token-label
+            fallback_cmd = [
+                "pkcs11-tool",
+                "--module",
+                str(settings.PKCS11_LIB_PATH),
+                "--login",
+                "--pin",
+                settings.PKCS11_TOKEN_PIN,
+                "--write-object",
+                str(cert_der_path),
+                "--type",
+                "cert",
+                "--label",
+                user_cert.pkcs11_key_label,
+                "--id",
+                user_cert.pkcs11_key_id,
+            ]
+
+            proc = subprocess.run(fallback_cmd, capture_output=True, text=True)
+            cmd = fallback_cmd
+
+        return {
+            "ok": proc.returncode == 0,
+            "command": " ".join(cmd),
+            "stdout": proc.stdout,
+            "stderr": proc.stderr,
+        }

@@ -17,6 +17,7 @@ from .views import (
     VerifySignatureView,
     PublicVerifyUploadView,
     DownloadVerificationPackageView,
+    DownloadFullDocumentVerificationPackageView,
 )
 
 urlpatterns = [
@@ -36,4 +37,5 @@ urlpatterns = [
     path("audit/", AuditLogListView.as_view(), name="audit-log-list"),
     path("verify/upload/", PublicVerifyUploadView.as_view(), name="public-verify-upload"),
     path("signatures/<int:pk>/download-package/", DownloadVerificationPackageView.as_view(), name="download-verification-package"),
+    path("documents/<int:pk>/full-verification-package/", DownloadFullDocumentVerificationPackageView.as_view(), name="download-full-document-verification-package"),
 ]

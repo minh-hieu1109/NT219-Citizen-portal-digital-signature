@@ -25,6 +25,17 @@ class Document(models.Model):
     )
     uploaded_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    current_signed_pdf = models.FileField(
+        upload_to="documents/pades/current/",
+        null=True,
+        blank=True,
+    )
 
+    final_signed_pdf = models.FileField(
+        upload_to="documents/pades/final/",
+        null=True,
+        blank=True,
+    )
     def __str__(self):
         return f"{self.title} - {self.owner.email}"
+    

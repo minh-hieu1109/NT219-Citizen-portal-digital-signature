@@ -199,55 +199,68 @@ def generate_signature_artifacts(signature_record):
         encoding="utf-8",
     )
     # 6. PAdES artifact
-    try:
-        document_path = Path(document.file.path)
+    # try:
+    #     document_path = Path(document.file.path)
 
-        if document_path.suffix.lower() != ".pdf":
-            result["pades"] = {
-                "ok": False,
-                "status": "skipped",
-                "message": "PAdES skipped because document is not a PDF.",
-            }
-        elif not key_path:
-            result["pades"] = {
-                "ok": False,
-                "status": "skipped",
-                "message": key_error,
-            }
-        else:
-            with tempfile.TemporaryDirectory() as tmpdir:
-                tmpdir = Path(tmpdir)
+    #     if document_path.suffix.lower() != ".pdf":
+    #         result["pades"] = {
+    #             "ok": False,
+    #             "status": "skipped",
+    #             "message": "PAdES skipped because document is not a PDF.",
+    #         }
+    #     elif not key_path:
+    #         result["pades"] = {
+    #             "ok": False,
+    #             "status": "skipped",
+    #             "message": key_error,
+    #         }
+    #     else:
+    #         with tempfile.TemporaryDirectory() as tmpdir:
+    #             tmpdir = Path(tmpdir)
 
-                signer_cert_path = tmpdir / "signer_certificate.pem"
-                signer_cert_path.write_text(
-                    signature_record.certificate_pem,
-                    encoding="utf-8",
-                )
+    #             signer_cert_path = tmpdir / "signer_certificate.pem"
+    #             signer_cert_path.write_text(
+    #                 signature_record.certificate_pem,
+    #                 encoding="utf-8",
+    #             )
 
-                signed_pdf_path = pades_dir / "signed_document.pdf"
+    #             signed_pdf_path = pades_dir / "signed_document.pdf"
 
-                pades_result = create_pades_signature(
-                    input_pdf_path=str(document_path),
-                    signer_cert_path=str(signer_cert_path),
-                    signer_key_path=str(key_path),
-                    output_pdf_path=str(signed_pdf_path),
-                    ca_cert_path=str(settings.PKI_ROOT_CA_CERT),
-                )
+    #             pades_result = create_pades_signature(
+    #                 input_pdf_path=str(document_path),
+    #                 signer_cert_path=str(signer_cert_path),
+    #                 signer_key_path=str(key_path),
+    #                 output_pdf_path=str(signed_pdf_path),
+    #                 ca_cert_path=str(settings.PKI_ROOT_CA_CERT),
+    #             )
 
-                result["pades"] = pades_result
+    #             result["pades"] = pades_result
 
-                if pades_result.get("ok"):
-                    result["pades"]["file"] = "pades/signed_document.pdf"
-                else:
-                    result["ok"] = False
+    #             if pades_result.get("ok"):
+    #                 result["pades"]["file"] = "pades/signed_document.pdf"
+    #             else:
+    #                 result["ok"] = False
 
-    except Exception as exc:
-        result["pades"] = {
-            "ok": False,
-            "status": "error",
-            "message": f"PAdES generation failed: {exc}",
-        }
-        result["ok"] = False
+    # except Exception as exc:
+    #     result["pades"] = {
+    #         "ok": False,
+    #         "status": "error",
+    #         "message": f"PAdES generation failed: {exc}",
+    #     }
+    #     result["ok"] = False
+
+    # (pades_dir / "pades_status.txt").write_text(
+    #     json.dumps(result["pades"], indent=2, ensure_ascii=False),
+    #     encoding="utf-8",
+    # )
+    result["pades"] = {
+        "ok": False,
+        "status": "skipped",
+        "message": (
+            "PAdES is handled by sequential PAdES service. "
+            "This artifact generator only creates RAW/CAdES package."
+        ),
+    }
 
     (pades_dir / "pades_status.txt").write_text(
         json.dumps(result["pades"], indent=2, ensure_ascii=False),

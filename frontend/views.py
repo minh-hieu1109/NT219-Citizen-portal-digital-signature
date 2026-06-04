@@ -313,7 +313,10 @@ class RemoteSignView(LoginRequiredMixin, View):
         try:
             signature_record = remote_sign_signing_request(signing_request)
 
-            artifact_result = generate_signature_artifacts(signature_record)
+            artifact_result = {
+                "ok": True,
+                "message": "Artifacts generated during remote signing service.",
+            }
 
             try:
                 log_action(
@@ -953,5 +956,214 @@ class DownloadVerificationPackageView(LoginRequiredMixin, View):
         response = HttpResponse(buffer.getvalue(), content_type="application/zip")
         response["Content-Disposition"] = (
             f'attachment; filename="verification_package_signature_{signature_record.id}.zip"'
+        )
+        return response
+    
+class DownloadFullDocumentVerificationPackageView(LoginRequiredMixin, View):
+    def get(self, request, pk):
+        document = get_object_or_404(
+            Document.objects.select_related("owner"),
+            pk=pk,
+        )
+
+        user = request.user
+
+        related_requests = document.signing_requests.select_related(
+            "requested_by",
+            "signer",
+        )
+
+        allowed = (
+            user.role in {User.Role.OFFICER, User.Role.ADMIN}
+            or document.owner == user
+            or related_requests.filter(requested_by=user).exists()
+            or related_requests.filter(signer=user).exists()
+        )
+
+        if not allowed:
+            return HttpResponseForbidden(
+                "You do not have permission to download this document verification package."
+            )
+
+        if not document.file:
+            raise Http404("Document file not found.")
+
+        signature_records = (
+            SignatureRecord.objects.select_related(
+                "signing_request",
+                "signing_request__document",
+                "signing_request__requested_by",
+                "signing_request__signer",
+            )
+            .filter(signing_request__document=document)
+            .order_by("signed_at")
+        )
+
+        buffer = io.BytesIO()
+
+        package_metadata = {
+            "document_id": document.id,
+            "document_title": document.title,
+            "document_owner": document.owner.email,
+            "document_sha256": document.sha256_hash,
+            "document_status": document.status,
+            "final_signed_pdf": (
+                "document/final_signed_document.pdf"
+                if getattr(document, "final_signed_pdf", None) and document.final_signed_pdf
+                else ""
+            ),
+            "current_signed_pdf": (
+                "document/current_signed_document.pdf"
+                if getattr(document, "current_signed_pdf", None)
+                and document.current_signed_pdf
+                and not document.final_signed_pdf
+                else ""
+            ),
+            "signatures": [],
+            "note": (
+                "This package contains the original document, final/current PAdES PDF if available, "
+                "Citizen/Officer signatures, certificates, timestamps, and metadata."
+            ),
+        }
+
+        def write_if_exists(zf, src_path, zip_path):
+            src_path = Path(src_path)
+            if src_path.exists():
+                zf.writestr(zip_path, src_path.read_bytes())
+                return True
+            return False
+
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            document_name = Path(document.file.name).name
+
+            with document.file.open("rb") as f:
+                zf.writestr(f"document/{document_name}", f.read())
+            
+            if getattr(document, "final_signed_pdf", None):
+                try:
+                    if document.final_signed_pdf:
+                        with document.final_signed_pdf.open("rb") as f:
+                            zf.writestr("document/final_signed_document.pdf", f.read())
+                except Exception:
+                    pass
+
+            elif getattr(document, "current_signed_pdf", None):
+                try:
+                    if document.current_signed_pdf:
+                        with document.current_signed_pdf.open("rb") as f:
+                            zf.writestr("document/current_signed_document.pdf", f.read())
+                except Exception:
+                    pass
+
+            ca_cert_path = Path(settings.PKI_ROOT_CA_CERT)
+            if ca_cert_path.exists():
+                zf.writestr("certs/ca_certificate.pem", ca_cert_path.read_bytes())
+
+            for sr in signature_records:
+                signing_request = sr.signing_request
+                signer = signing_request.signer
+
+                if signer and signer == document.owner:
+                    role_folder = "citizen"
+                    signature_role = "citizen"
+                elif signer and signer.role in {User.Role.OFFICER, User.Role.ADMIN}:
+                    role_folder = "officer"
+                    signature_role = "officer"
+                else:
+                    role_folder = f"signature_{sr.id}"
+                    signature_role = "other"
+
+                # Tránh đè nếu có nhiều chữ ký cùng role
+                base_folder = f"signatures/{role_folder}_{sr.id}"
+
+                artifact_dir = get_signature_artifact_dir(sr)
+
+                write_if_exists(
+                    zf,
+                    artifact_dir / "signature" / "signature.sig",
+                    f"{base_folder}/signature.sig",
+                )
+                write_if_exists(
+                    zf,
+                    artifact_dir / "signature" / "signature.p7s",
+                    f"{base_folder}/signature.p7s",
+                )
+                write_if_exists(
+                    zf,
+                    artifact_dir / "signature" / "cms_status.txt",
+                    f"{base_folder}/cms_status.txt",
+                )
+                write_if_exists(
+                    zf,
+                    artifact_dir / "pades" / "signed_document.pdf",
+                    f"{base_folder}/pades_signed_document.pdf",
+                )
+                write_if_exists(
+                    zf,
+                    artifact_dir / "pades" / "pades_status.txt",
+                    f"{base_folder}/pades_status.txt",
+                )
+                write_if_exists(
+                    zf,
+                    artifact_dir / "certs" / "signer_certificate.pem",
+                    f"{base_folder}/signer_certificate.pem",
+                )
+                write_if_exists(
+                    zf,
+                    artifact_dir / "timestamp" / "timestamp.tsr",
+                    f"{base_folder}/timestamp.tsr",
+                )
+                write_if_exists(
+                    zf,
+                    artifact_dir / "metadata.json",
+                    f"{base_folder}/metadata.json",
+                )
+                write_if_exists(
+                    zf,
+                    artifact_dir / "artifact_status.json",
+                    f"{base_folder}/artifact_status.json",
+                )
+
+                # Fallback nếu artifact chưa có
+                if not (artifact_dir / "signature" / "signature.sig").exists():
+                    zf.writestr(
+                        f"{base_folder}/signature.sig",
+                        sr.signature_value.encode("utf-8"),
+                    )
+
+                if not (artifact_dir / "certs" / "signer_certificate.pem").exists():
+                    zf.writestr(
+                        f"{base_folder}/signer_certificate.pem",
+                        sr.certificate_pem or "",
+                    )
+
+                package_metadata["signatures"].append(
+                    {
+                        "signature_record_id": sr.id,
+                        "signing_request_id": signing_request.id,
+                        "role": signature_role,
+                        "signer_email": signer.email if signer else "",
+                        "requester_email": signing_request.requested_by.email,
+                        "certificate_subject": sr.certificate_subject,
+                        "certificate_serial": sr.certificate_serial,
+                        "algorithm": sr.algorithm,
+                        "signed_hash": sr.signed_hash,
+                        "signed_at": sr.signed_at.isoformat(),
+                        "signature_file": f"{base_folder}/signature.p7s",
+                        "raw_signature_file": f"{base_folder}/signature.sig",
+                        "signer_certificate_file": f"{base_folder}/signer_certificate.pem",
+                    }
+                )
+
+            zf.writestr(
+                "document_metadata.json",
+                json.dumps(package_metadata, indent=2, ensure_ascii=False),
+            )
+
+        buffer.seek(0)
+
+        response = HttpResponse(buffer.getvalue(), content_type="application/zip")
+        response["Content-Disposition"] = (
+            f'attachment; filename="full_verification_package_document_{document.id}.zip"'
         )
         return response

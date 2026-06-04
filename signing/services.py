@@ -12,7 +12,7 @@ from documents.models import Document
 from .models import SignatureRecord, SigningRequest
 from .signer_backends import get_signer_backend
 from verification.ltv_services import archive_validation_evidence
-
+from signing.pades_sequential_services import create_sequential_pades_for_signature_record
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, utils
