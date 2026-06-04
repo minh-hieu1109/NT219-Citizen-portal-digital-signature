@@ -21,3 +21,4 @@ pki-lab/users/private/user_*_key.pem
 experiments/results/keys/*_nopass.pem
 experiments/results/cms/
 experiments/results/pades/
+keys/
