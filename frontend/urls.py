@@ -18,6 +18,8 @@ from .views import (
     PublicVerifyUploadView,
     DownloadVerificationPackageView,
     DownloadFullDocumentVerificationPackageView,
+    CitizenGeneratedDocumentCreateView,
+    PublicDocumentVerifyByQRView,
 )
 
 urlpatterns = [
@@ -38,4 +40,6 @@ urlpatterns = [
     path("verify/upload/", PublicVerifyUploadView.as_view(), name="public-verify-upload"),
     path("signatures/<int:pk>/download-package/", DownloadVerificationPackageView.as_view(), name="download-verification-package"),
     path("documents/<int:pk>/full-verification-package/", DownloadFullDocumentVerificationPackageView.as_view(), name="download-full-document-verification-package"),
+    path("documents/create-form/", CitizenGeneratedDocumentCreateView.as_view(), name="create-generated-document"),
+    path("public/verify/document/<uuid:verification_id>/", PublicDocumentVerifyByQRView.as_view(), name="public-document-verify-qr"),
 ]

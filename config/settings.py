@@ -161,3 +161,5 @@ REQUIRE_STRONG_AUTH_FOR_REMOTE_SIGNING = os.getenv(
 ENABLE_OCSP_CHECK = os.getenv("ENABLE_OCSP_CHECK", "True") == "True"
 OCSP_RESPONDER_URL = os.getenv("OCSP_RESPONDER_URL", "http://localhost:8888")
 OPENSSL_BIN = os.getenv("OPENSSL_BIN", "openssl")
+
+SITE_BASE_URL = "http://127.0.0.1:8010/"

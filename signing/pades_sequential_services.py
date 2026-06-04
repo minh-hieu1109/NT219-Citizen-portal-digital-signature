@@ -88,6 +88,7 @@ def create_pades_signature_softhsm(
             str(config_path),
             "sign",
             "addsig",
+            "--no-strict-syntax",
             "--field",
             field_name,
             "--use-pades",

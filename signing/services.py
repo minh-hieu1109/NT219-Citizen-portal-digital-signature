@@ -246,6 +246,21 @@ def remote_sign_signing_request(signing_request: SigningRequest) -> SignatureRec
         )
         signature_record.save(update_fields=["timestamp_message"])
 
+    try:
+        pades_result = create_sequential_pades_for_signature_record(signature_record)
+        if not pades_result.get("ok"):
+            signature_record.timestamp_message = (
+                (signature_record.timestamp_message or "")
+                + f"\nSequential PAdES status: {pades_result.get('message', '')}"
+            )
+            signature_record.save(update_fields=["timestamp_message"])
+    except Exception as e:
+        signature_record.timestamp_message = (
+            (signature_record.timestamp_message or "")
+            + f"\nSequential PAdES failed: {str(e)}"
+        )
+        signature_record.save(update_fields=["timestamp_message"])
+
     # Citizen vừa tự ký xong thì tự tạo request cho Officer
     if signing_request.signer_id == document.owner_id:
         create_officer_approval_request_after_citizen_sign(signing_request)

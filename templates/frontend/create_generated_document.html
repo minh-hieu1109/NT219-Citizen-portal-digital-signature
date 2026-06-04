@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Create Citizen Form</h2>
+
+<form method="post">
+  {% csrf_token %}
+
+  <div class="mb-3">
+    <label>Title</label>
+    {{ form.title }}
+  </div>
+
+  <div class="mb-3">
+    <label>Content</label>
+    {{ form.content }}
+  </div>
+
+  <button type="submit" class="btn btn-primary">
+    Generate PDF and Sign
+  </button>
+</form>
+{% endblock %}

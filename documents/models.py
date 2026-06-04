@@ -1,6 +1,6 @@
 from django.db import models
 from django.conf import settings
-
+import uuid
 
 class Document(models.Model):
     class Status(models.TextChoices):
@@ -35,6 +35,17 @@ class Document(models.Model):
         upload_to="documents/pades/final/",
         null=True,
         blank=True,
+    )
+    verification_id = models.UUIDField(
+        default=uuid.uuid4,
+        unique=True,
+        editable=False,
+    )
+
+    form_type = models.CharField(
+        max_length=50,
+        blank=True,
+        default="uploaded_document",
     )
     def __str__(self):
         return f"{self.title} - {self.owner.email}"

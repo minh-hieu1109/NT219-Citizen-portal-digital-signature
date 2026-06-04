@@ -31,6 +31,9 @@ from verification.public_verify_services import verify_public_cms_detached, veri
 from signing.pades_services import create_pades_signature
 from signing.artifact_services import generate_signature_artifacts
 from signing.artifact_services import get_signature_artifact_dir
+from documents.form_pdf_services import generate_citizen_form_pdf
+from .forms import CitizenGeneratedDocumentForm
+from django.core.files import File
 class OfficerAdminRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
     raise_exception = True
 
@@ -151,6 +154,19 @@ class DocumentUploadView(LoginRequiredMixin, FormView):
         document.sha256_hash = calculate_sha256(form.cleaned_data["file"])
         document.status = Document.Status.UPLOADED
         document.save()
+        signing_request = None
+
+        if self.request.user.role == User.Role.CITIZEN:
+            signing_request = SigningRequest.objects.create(
+                document=document,
+                requested_by=self.request.user,
+                signer=self.request.user,
+                signing_type=SigningRequest.SigningType.REMOTE,
+                status=SigningRequest.Status.PENDING,
+            )
+
+            document.status = Document.Status.PENDING_SIGN
+            document.save(update_fields=["status", "updated_at"])
         try:
             log_action(
                 user=self.request.user,
@@ -162,6 +178,13 @@ class DocumentUploadView(LoginRequiredMixin, FormView):
             )
         except Exception:
             pass
+        if signing_request:
+            messages.success(
+                self.request,
+                "Document uploaded. A self-signing request has been created. Please sign the document."
+            )
+            return redirect("signing-request-detail", pk=signing_request.pk)
+
         messages.success(self.request, "Document uploaded successfully.")
         return super().form_valid(form)
 
@@ -1167,3 +1190,107 @@ class DownloadFullDocumentVerificationPackageView(LoginRequiredMixin, View):
             f'attachment; filename="full_verification_package_document_{document.id}.zip"'
         )
         return response
+    
+class CitizenGeneratedDocumentCreateView(LoginRequiredMixin, FormView):
+    template_name = "frontend/create_generated_document.html"
+    form_class = CitizenGeneratedDocumentForm
+
+    def dispatch(self, request, *args, **kwargs):
+        user = request.user
+
+        if user.role != User.Role.CITIZEN:
+            return HttpResponseForbidden("Only citizens can create this form.")
+
+        if not user.is_verified_identity:
+            messages.error(request, "Your identity has not been verified yet.")
+            return redirect("home")
+
+        if not UserCertificate.objects.filter(
+            user=user,
+            status=UserCertificate.Status.ACTIVE,
+        ).exists():
+            messages.error(request, "You do not have an active certificate yet.")
+            return redirect("home")
+
+        return super().dispatch(request, *args, **kwargs)
+
+    def form_valid(self, form):
+        user = self.request.user
+
+        document = Document.objects.create(
+            owner=user,
+            title=form.cleaned_data["title"],
+            status=Document.Status.UPLOADED,
+            form_type="citizen_generated_form",
+        )
+
+        pdf_path = generate_citizen_form_pdf(
+            document=document,
+            citizen=user,
+            form_data=form.cleaned_data,
+        )
+
+        with open(pdf_path, "rb") as f:
+            document.file.save(
+                Path(pdf_path).name,
+                File(f),
+                save=False,
+            )
+
+        document.sha256_hash = calculate_sha256(document.file)
+        document.status = Document.Status.PENDING_SIGN
+        document.save()
+
+        signing_request = SigningRequest.objects.create(
+            document=document,
+            requested_by=user,
+            signer=user,
+            signing_type=SigningRequest.SigningType.REMOTE,
+            status=SigningRequest.Status.PENDING,
+        )
+
+        messages.success(
+            self.request,
+            "Form PDF created. Please sign it as Citizen."
+        )
+
+        return redirect("signing-request-detail", pk=signing_request.pk)
+    
+class PublicDocumentVerifyByQRView(View):
+    def get(self, request, verification_id):
+        document = get_object_or_404(
+            Document.objects.select_related("owner"),
+            verification_id=verification_id,
+        )
+
+        signatures = SignatureRecord.objects.filter(
+            signing_request__document=document
+        ).select_related(
+            "signing_request",
+            "signing_request__signer",
+        )
+
+        citizen_signature = signatures.filter(
+            signing_request__signer=document.owner
+        ).first()
+
+        officer_signature = signatures.filter(
+            signing_request__signer__role__in=[
+                User.Role.OFFICER,
+                User.Role.ADMIN,
+            ]
+        ).first()
+
+        context = {
+            "document": document,
+            "citizen_signature": citizen_signature,
+            "officer_signature": officer_signature,
+            "has_final_pdf": bool(document.final_signed_pdf),
+            "verification_id": verification_id,
+        }
+
+        return render(
+            request,
+            "frontend/public_document_verify_qr.html",
+            context,
+        )

@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Document Verification</h2>
+
+<table class="table">
+  <tr>
+    <th>Document</th>
+    <td>{{ document.title }}</td>
+  </tr>
+  <tr>
+    <th>Owner</th>
+    <td>{{ document.owner.email }}</td>
+  </tr>
+  <tr>
+    <th>Status</th>
+    <td>{{ document.status }}</td>
+  </tr>
+  <tr>
+    <th>Verification ID</th>
+    <td>{{ verification_id }}</td>
+  </tr>
+</table>
+
+<h4>Signature Status</h4>
+
+<table class="table">
+  <tr>
+    <th>Citizen Signature</th>
+    <td>
+      {% if citizen_signature %}
+        VALID / Signed by {{ citizen_signature.signing_request.signer.email }}
+        <br>
+        Subject: {{ citizen_signature.certificate_subject }}
+      {% else %}
+        Missing
+      {% endif %}
+    </td>
+  </tr>
+
+  <tr>
+    <th>Officer Signature</th>
+    <td>
+      {% if officer_signature %}
+        VALID / Signed by {{ officer_signature.signing_request.signer.email }}
+        <br>
+        Subject: {{ officer_signature.certificate_subject }}
+      {% else %}
+        Missing
+      {% endif %}
+    </td>
+  </tr>
+
+  <tr>
+    <th>Final signed PDF</th>
+    <td>
+      {% if document.final_signed_pdf %}
+        Available
+        <br>
+        <a href="{{ document.final_signed_pdf.url }}">
+          Download final signed PDF
+        </a>
+      {% else %}
+        Not ready
+      {% endif %}
+    </td>
+  </tr>
+</table>
+{% endblock %}

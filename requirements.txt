@@ -10,3 +10,5 @@ requests
 pyHanko
 pyhanko-cli
 pyHanko[pkcs11]
+reportlab
+qrcode[pil]

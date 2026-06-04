@@ -13,6 +13,11 @@
             <h1><a href="{% url 'home' %}">Citizen Portal Demo</a></h1>
             <nav>
                 <a href="{% url 'home' %}">Dashboard</a>
+                {% if user.is_authenticated and user.role == "citizen" %}
+                    <a class="nav-link" href="{% url 'create-generated-document' %}">
+                        Create Form
+                    </a>
+                {% endif %}
                 <a href="{% url 'public-verify-upload' %}">Public Verify</a>
                 {% if user.is_authenticated %}
                     <a href="{% url 'document-list' %}">Documents</a>
