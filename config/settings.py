@@ -10,7 +10,7 @@ DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
 PKI_OPENSSL_BIN = "/usr/bin/openssl"
 PKI_ROOT_CA_CERT = BASE_DIR / "pki-mldsa" / "certs" / "rootCA_mldsa.crt"
-PKI_ROOT_CA_KEY = BASE_DIR / "pki-lab" / "private" / "rootCA.key"
+PKI_ROOT_CA_KEY = BASE_DIR / "pki-mldsa" / "private" / "rootCA_mldsa.key"
 PKI_OPENSSL_CNF = BASE_DIR / "pki-lab" / "openssl.cnf"
 
 PKI_USER_PRIVATE_DIR = BASE_DIR / "pki-lab" / "users" / "private"
