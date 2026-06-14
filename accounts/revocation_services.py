@@ -24,12 +24,6 @@ def _load_lab_ca():
 
 
 def regenerate_lab_crl() -> Path:
-    """
-    Generate lab CRL from DB state.
-
-    This is suitable for the current PoC because user certificates are issued
-    and stored by the Django app, not always tracked by OpenSSL CA index.txt.
-    """
     ca_cert, ca_key = _load_lab_ca()
 
     now = datetime.now(dt_timezone.utc)
@@ -83,12 +77,6 @@ def regenerate_lab_crl() -> Path:
 
 
 def revoke_user_certificate(user_cert: UserCertificate) -> Path:
-    """
-    Revoke certificate and regenerate lab CRL.
-
-    Revoke means permanent revocation. Do not set it back to active.
-    If user needs to sign again, issue a new certificate.
-    """
     if user_cert.status != UserCertificate.Status.REVOKED:
         user_cert.status = UserCertificate.Status.REVOKED
         user_cert.save(update_fields=["status"])

@@ -17,6 +17,8 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, utils
 from signing.artifact_services import generate_signature_artifacts
+from signing.mldsa_openssl import mldsa_verify_with_cert_pem
+
 def create_timestamp_token_for_file(file_path: str) -> dict:
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
@@ -201,7 +203,7 @@ def remote_sign_signing_request(signing_request: SigningRequest) -> SignatureRec
         certificate_pem=user_cert.certificate_pem,
         certificate_subject=user_cert.certificate_subject,
         certificate_serial=user_cert.certificate_serial,
-        algorithm="RSA-SHA256",
+        algorithm="ML-DSA-65",
         signed_hash=file_hash_hex,
     )
 
@@ -303,7 +305,7 @@ def prepare_client_signing_request(signing_request: SigningRequest) -> dict:
         "document_id": document.id,
         "document_title": document.title,
         "digest_hex": file_hash_hex,
-        "algorithm": "RSA-SHA256-PREHASHED",
+        "algorithm": "ML-DSA-65",
         "certificate_serial": user_cert.certificate_serial,
     }
 
@@ -311,7 +313,7 @@ def prepare_client_signing_request(signing_request: SigningRequest) -> dict:
 def complete_client_signing_request(
     signing_request: SigningRequest,
     signature_b64: str,
-    algorithm: str = "RSA-SHA256-PREHASHED",
+    algorithm: str = "ML-DSA-65",
 ) -> SignatureRecord:
     signer = signing_request.signer
     if not signer:
@@ -336,8 +338,7 @@ def complete_client_signing_request(
         file_bytes = f.read()
 
     file_hash_hex = sha256(file_bytes).hexdigest()
-    digest_bytes = bytes.fromhex(file_hash_hex)
-
+    
     try:
         signature_bytes = base64.b64decode(signature_b64)
     except Exception:
@@ -345,16 +346,34 @@ def complete_client_signing_request(
 
     cert = x509.load_pem_x509_certificate(user_cert.certificate_pem.encode("utf-8"))
 
-    if str(cert.serial_number) != str(user_cert.certificate_serial):
-        raise ValueError("Stored certificate does not match signer certificate serial.")
+    cert_serial_hex = format(cert.serial_number, "X").upper()
+    stored_serial = str(user_cert.certificate_serial or "").replace(":", "").upper()
 
-    public_key = cert.public_key()
-    public_key.verify(
-        signature_bytes,
-        digest_bytes,
-        padding.PKCS1v15(),
-        utils.Prehashed(hashes.SHA256()),
-    )
+    if cert_serial_hex != stored_serial:
+        raise ValueError(
+            "Stored certificate does not match signer certificate serial. "
+            f"cert_serial_hex={cert_serial_hex}, stored_serial={stored_serial}"
+        )
+
+    algorithm = (algorithm or "").strip().upper()
+
+    if algorithm in ["ML-DSA-65", "MLDSA-65"]:
+        ok = mldsa_verify_with_cert_pem(
+            cert_pem=user_cert.certificate_pem,
+            data=file_bytes,
+            signature=signature_bytes,
+        )
+        if not ok:
+            raise ValueError("ML-DSA client signature verification failed.")
+    else:
+        public_key = cert.public_key()
+        digest_bytes = bytes.fromhex(file_hash_hex)
+        public_key.verify(
+            signature_bytes,
+            digest_bytes,
+            padding.PKCS1v15(),
+            utils.Prehashed(hashes.SHA256()),
+        )
 
     signature_record = SignatureRecord.objects.create(
         signing_request=signing_request,

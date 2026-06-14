@@ -65,7 +65,6 @@ def issue_certificate_from_csr(
             "status": UserCertificate.Status.ACTIVE,
             "valid_from": cert.not_valid_before_utc if hasattr(cert, "not_valid_before_utc") else now,
             "valid_to": cert.not_valid_after_utc if hasattr(cert, "not_valid_after_utc") else now,
-            # file-based phase: các field PKCS#11 có thể để trống
             "pkcs11_token_label": "",
             "pkcs11_key_label": client_key_label or "",
             "pkcs11_key_id": "",

@@ -9,7 +9,7 @@ SECRET_KEY = os.getenv('SECRET_KEY')
 DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
 PKI_OPENSSL_BIN = "/usr/bin/openssl"
-PKI_ROOT_CA_CERT = BASE_DIR / "pki-lab" / "certs" / "rootCA.crt"
+PKI_ROOT_CA_CERT = BASE_DIR / "pki-mldsa" / "certs" / "rootCA_mldsa.crt"
 PKI_ROOT_CA_KEY = BASE_DIR / "pki-lab" / "private" / "rootCA.key"
 PKI_OPENSSL_CNF = BASE_DIR / "pki-lab" / "openssl.cnf"
 
@@ -26,7 +26,7 @@ PKCS11_KEY_LABEL_PREFIX = "user-key"
 
 PKI_TSA_CONF = BASE_DIR / "pki-lab" / "tsa" / "tsa.conf"
 PKI_TSA_SECTION = "tsa_config1"
-PKI_TSA_CERT = BASE_DIR / "pki-lab" / "tsa" / "certs" / "tsa.crt"
+PKI_TSA_CERT = BASE_DIR / "pki-lab" / "tsa" / "certs" / "tsa_mldsa.crt"
 
 # Application definition
 
@@ -163,3 +163,5 @@ OCSP_RESPONDER_URL = os.getenv("OCSP_RESPONDER_URL", "http://localhost:8888")
 OPENSSL_BIN = os.getenv("OPENSSL_BIN", "openssl")
 
 SITE_BASE_URL = "http://127.0.0.1:8010/"
+
+CLIENT_SIGNER_DEMO_TOKEN = "client-demo-token-123"
