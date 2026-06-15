@@ -11,9 +11,8 @@ from tkinter import messagebox
 
 
 SERVER_URL = "http://127.0.0.1:8010"
-TOKEN = "client-demo-token-123"
-SIGNER_EMAIL = "citizen@example.com"
-PRIVATE_KEY = Path("client_keys/citizen_mldsa.key")
+BASE_DIR = Path(__file__).resolve().parent
+PRIVATE_KEY = BASE_DIR / "client_keys" / "citizen_mldsa.key"
 
 OPENSSL = "openssl"
 
@@ -23,34 +22,51 @@ class ClientSignerApp:
         self.root = root
         self.root.title("Citizen ML-DSA Client Signer")
         self.requests = []
+        token_frame = tk.Frame(root)
+        token_frame.pack(padx=10, pady=5, fill=tk.X)
 
+        tk.Label(token_frame, text="Signing session token:").pack(side=tk.LEFT)
+        self.token_var = tk.StringVar()
+        tk.Entry(token_frame, textvariable=self.token_var, width=90, show="*").pack(side=tk.LEFT, padx=5)
         self.listbox = tk.Listbox(root, width=110, height=15)
         self.listbox.pack(padx=10, pady=10)
 
         btn_frame = tk.Frame(root)
         btn_frame.pack(pady=5)
 
-        tk.Button(btn_frame, text="Refresh pending documents", command=self.refresh).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="Refresh pending document", command=self.refresh).pack(side=tk.LEFT, padx=5)
         tk.Button(btn_frame, text="Sign selected document", command=self.sign_selected).pack(side=tk.LEFT, padx=5)
 
         self.refresh()
 
     def headers(self):
-        return {"X-Client-Signer-Token": TOKEN}
+        token = self.token_var.get().strip()
+        return {
+            "X-Client-Signing-Session": token
+        }
 
     def refresh(self):
+        if not self.token_var.get().strip():
+            messagebox.showwarning("Missing token", "Please paste the signing session token.")
+            return
         self.listbox.delete(0, tk.END)
         self.requests = []
 
-        url = f"{SERVER_URL}/api/signing/api/client/pending/?email={SIGNER_EMAIL}"
-        resp = requests.get(url, headers=self.headers(), timeout=10)
-        data = resp.json()
+        url = f"{SERVER_URL}/api/signing/api/client/pending/"
 
-        if not data.get("ok"):
+        try:
+            resp = requests.get(url, headers=self.headers(), timeout=10)
+            data = resp.json()
+        except Exception as e:
+            messagebox.showerror("Connection error", str(e))
+            return
+
+        if resp.status_code != 200 or not data.get("ok"):
             messagebox.showerror("Error", data.get("error", "Unknown error"))
             return
 
-        self.requests = data["requests"]
+        request_item = data.get("request")
+        self.requests = [request_item] if request_item else []
 
         if not self.requests:
             self.listbox.insert(tk.END, "No pending client signing requests.")
@@ -61,11 +77,15 @@ class ClientSignerApp:
                 f"Request #{item['request_id']} | "
                 f"Document #{item['document_id']} | "
                 f"{item['document_title']} | "
+                f"Algorithm: {item['algorithm']} | "
                 f"Hash: {item['document_hash'][:16]}..."
             )
             self.listbox.insert(tk.END, line)
 
     def sign_selected(self):
+        if not self.token_var.get().strip():
+            messagebox.showwarning("Missing token", "Please paste the signing session token.")
+            return
         idx = self.listbox.curselection()
         if not idx:
             messagebox.showwarning("Select", "Please select a document to sign.")
@@ -76,6 +96,10 @@ class ClientSignerApp:
             return
 
         item = self.requests[idx[0]]
+
+        if item.get("algorithm") != "ML-DSA-65":
+            messagebox.showerror("Unsupported algorithm", f"Expected ML-DSA-65, got {item.get('algorithm')}")
+            return
 
         if not PRIVATE_KEY.exists():
             messagebox.showerror("Missing key", f"Private key not found:\n{PRIVATE_KEY}")
@@ -181,7 +205,12 @@ class ClientSignerApp:
                 f"Algorithm: {result['algorithm']}"
             )
 
-            self.refresh()
+            self.requests = []
+            self.listbox.delete(0, tk.END)
+            self.listbox.insert(
+                tk.END,
+                "Signing completed. This session token has been used and invalidated."
+            )
 
         except Exception as e:
             messagebox.showerror("Unexpected error", str(e))
