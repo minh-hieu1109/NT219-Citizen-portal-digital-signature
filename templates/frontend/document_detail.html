@@ -113,4 +113,23 @@
         Download full verification package
     </a>
 </div>
+{% if request.user == document.owner and document.status != "signed" %}
+  <div class="card mt-3">
+    <h3>Choose signing flow</h3>
+
+    <form method="post" action="{% url 'document-client-sign-request' document.pk %}" style="display:inline;">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-primary">
+        Client Sign with Local ML-DSA Signer
+      </button>
+    </form>
+
+    <form method="post" action="{% url 'document-remote-officer-request' document.pk %}" style="display:inline;">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-secondary">
+        Request Remote Officer Signing
+      </button>
+    </form>
+  </div>
+{% endif %}
 {% endblock %}

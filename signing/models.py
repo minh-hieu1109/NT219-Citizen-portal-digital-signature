@@ -53,6 +53,38 @@ class SigningRequest(models.Model):
         choices=Status.choices,
         default=Status.PENDING
     )
+    client_token = models.CharField(
+        max_length=128,
+        blank=True,
+        null=True,
+        unique=True,
+        db_index=True,
+    )
+
+    client_token_expires_at = models.DateTimeField(
+        blank=True,
+        null=True,
+    )
+    class SigningPurpose(models.TextChoices):
+        CITIZEN_SELF_SIGN = "citizen_self_sign", "Citizen self sign"
+        OFFICER_APPROVAL = "officer_approval", "Officer approval"
+        REMOTE_TSP_SIGN = "remote_tsp_sign", "Remote TSP sign"
+
+    purpose = models.CharField(
+        max_length=50,
+        choices=SigningPurpose.choices,
+        default=SigningPurpose.CITIZEN_SELF_SIGN,
+    )
+
+    request_document_hash = models.CharField(max_length=64, blank=True)
+    request_nonce = models.CharField(max_length=128, blank=True)
+    requester_ip = models.GenericIPAddressField(null=True, blank=True)
+    requester_user_agent = models.TextField(blank=True)
+    auth_method = models.CharField(max_length=100, default="password_session")
+    consent_text = models.TextField(blank=True)
+    consent_hash = models.CharField(max_length=64, blank=True)
+
+
     nonce = models.CharField(max_length=64, default=default_signing_request_nonce, db_index=True)
     expires_at = models.DateTimeField(default=default_signing_request_expiry)
     used_at = models.DateTimeField(null=True, blank=True)
@@ -74,7 +106,7 @@ class SignatureRecord(models.Model):
     certificate_pem = models.TextField(blank=True)
     certificate_subject = models.CharField(max_length=255, blank=True)
     certificate_serial = models.CharField(max_length=255, blank=True)
-    algorithm = models.CharField(max_length=100, default="RSA-SHA256")
+    algorithm = models.CharField(max_length=100, default="ML-DSA-65")
     signed_hash = models.CharField(max_length=64)
     signed_at = models.DateTimeField(auto_now_add=True)
 

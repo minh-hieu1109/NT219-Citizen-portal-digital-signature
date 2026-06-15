@@ -20,6 +20,8 @@ from .views import (
     DownloadFullDocumentVerificationPackageView,
     CitizenGeneratedDocumentCreateView,
     PublicDocumentVerifyByQRView,
+    CreateClientSignRequestView,
+    CreateRemoteOfficerRequestView,
 )
 
 urlpatterns = [
@@ -42,4 +44,6 @@ urlpatterns = [
     path("documents/<int:pk>/full-verification-package/", DownloadFullDocumentVerificationPackageView.as_view(), name="download-full-document-verification-package"),
     path("documents/create-form/", CitizenGeneratedDocumentCreateView.as_view(), name="create-generated-document"),
     path("public/verify/document/<uuid:verification_id>/", PublicDocumentVerifyByQRView.as_view(), name="public-document-verify-qr"),
+    path("documents/<int:pk>/client-sign/request/",CreateClientSignRequestView.as_view(), name="document-client-sign-request"),
+    path("documents/<int:pk>/remote-officer/request/",CreateRemoteOfficerRequestView.as_view(),name="document-remote-officer-request"),
 ]

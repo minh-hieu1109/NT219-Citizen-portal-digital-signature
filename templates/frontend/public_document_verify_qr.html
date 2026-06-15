@@ -147,5 +147,32 @@
   The document is trustworthy only if the visible content, owner, Verification ID,
   signer, signing time, and fingerprint match this page.
 </div>
+<h3>Document</h3>
+<p>Title: {{ document.title }}</p>
+<p>Owner: {{ document.owner.email }}</p>
+<p>Verification ID: {{ verification_id }}</p>
+<p>Official hash: {{ official_hash }}</p>
+<p>Fingerprint: {{ fingerprint }}</p>
 
+<h3>Citizen Signature</h3>
+{% if citizen_signature %}
+  <p>Signer: {{ citizen_signature.signing_request.signer.email }}</p>
+  <p>Algorithm: {{ citizen_signature.algorithm }}</p>
+  <p>Certificate serial: {{ citizen_signature.certificate_serial }}</p>
+  <p>Signed at: {{ citizen_signature.signed_at }}</p>
+  <p>Timestamp: {{ citizen_signature.timestamp_status }}</p>
+{% else %}
+  <p>No citizen signature.</p>
+{% endif %}
+
+<h3>Officer Signature</h3>
+{% if officer_signature %}
+  <p>Signer: {{ officer_signature.signing_request.signer.email }}</p>
+  <p>Algorithm: {{ officer_signature.algorithm }}</p>
+  <p>Certificate serial: {{ officer_signature.certificate_serial }}</p>
+  <p>Signed at: {{ officer_signature.signed_at }}</p>
+  <p>Timestamp: {{ officer_signature.timestamp_status }}</p>
+{% else %}
+  <p>No officer signature.</p>
+{% endif %}
 {% endblock %}

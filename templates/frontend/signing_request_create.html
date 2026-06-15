@@ -40,5 +40,12 @@
         </div>
         <button type="submit" class="button" {% if eligible_signer_count == 0 %}disabled{% endif %}>Create signing request</button>
     </form>
+    {% if form.non_field_errors %}
+    <div class="alert alert-danger">
+        {% for error in form.non_field_errors %}
+        <div>{{ error }}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
 </div>
 {% endblock %}

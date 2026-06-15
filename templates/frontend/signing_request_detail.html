@@ -79,6 +79,30 @@
         <p>Signature record is not available yet.</p>
     {% endif %}
 </div>
+{% if can_show_client_sign and client_signing_token %}
+  <div class="card mt-3">
+    <h3>Client ML-DSA Signing Session</h3>
 
+    <p>Copy this short-lived token into the local signer app:</p>
+
+    <pre>{{ client_signing_token }}</pre>
+
+    <p>Run local signer:</p>
+
+    <pre>python client-signer-local/client_signer_gui.py</pre>
+  </div>
+{% endif %}
+<h3>Non-repudiation Evidence</h3>
+<table>
+  <tr><th>Requested by</th><td>{{ signing_request.requested_by.email }}</td></tr>
+  <tr><th>Signer</th><td>{{ signing_request.signer.email }}</td></tr>
+  <tr><th>Signing type</th><td>{{ signing_request.signing_type }}</td></tr>
+  <tr><th>Purpose</th><td>{{ signing_request.purpose }}</td></tr>
+  <tr><th>Document hash at request</th><td>{{ signing_request.request_document_hash }}</td></tr>
+  <tr><th>Consent hash</th><td>{{ signing_request.consent_hash }}</td></tr>
+  <tr><th>Nonce</th><td>{{ signing_request.request_nonce }}</td></tr>
+  <tr><th>Auth method</th><td>{{ signing_request.auth_method }}</td></tr>
+  <tr><th>Requester IP</th><td>{{ signing_request.requester_ip }}</td></tr>
+</table>
 <div class="actions"><a class="button" href="{% url 'signing-request-list' %}">Back</a></div>
 {% endblock %}

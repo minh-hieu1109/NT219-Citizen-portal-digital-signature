@@ -7,13 +7,14 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy
 from django.utils import timezone
 from django.views.generic import DetailView, FormView, ListView, TemplateView, View
-
+import secrets
+from hashlib import sha256
 from audit.models import AuditLog
 from audit.utils import log_action
 from documents.models import Document
 from documents.services import calculate_sha256
 from signing.models import SignatureRecord, SigningRequest
-from signing.services import remote_sign_signing_request
+from signing.services import remote_sign_signing_request, issue_client_signing_token
 from verification.models import ValidationEvidence, VerificationResult
 from verification.services import verify_signature_record
 from .forms import CitizenRegistrationForm, DocumentUploadForm, SigningRequestForm, PublicVerifyUploadForm
@@ -52,6 +53,48 @@ def has_active_certificate(user):
         user=user,
         status=UserCertificate.Status.ACTIVE,
     ).exists()
+
+def get_client_ip(request):
+    forwarded = request.META.get("HTTP_X_FORWARDED_FOR")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.META.get("REMOTE_ADDR")
+
+
+def attach_non_repudiation_evidence(signing_request, request):
+    document = signing_request.document
+
+    consent = {
+        "document_id": document.id,
+        "document_title": document.title,
+        "document_owner": document.owner.email if document.owner else "",
+        "requested_by": signing_request.requested_by.email if signing_request.requested_by else "",
+        "signer": signing_request.signer.email if signing_request.signer else "",
+        "signing_type": signing_request.signing_type,
+        "purpose": signing_request.purpose,
+        "document_hash": document.sha256_hash,
+        "created_at": timezone.now().isoformat(),
+    }
+
+    consent_text = json.dumps(consent, sort_keys=True, ensure_ascii=False)
+
+    signing_request.request_document_hash = document.sha256_hash or ""
+    signing_request.request_nonce = secrets.token_urlsafe(32)
+    signing_request.requester_ip = get_client_ip(request)
+    signing_request.requester_user_agent = request.META.get("HTTP_USER_AGENT", "")
+    signing_request.auth_method = "password_session"
+    signing_request.consent_text = consent_text
+    signing_request.consent_hash = sha256(consent_text.encode("utf-8")).hexdigest()
+
+    signing_request.save(update_fields=[
+        "request_document_hash",
+        "request_nonce",
+        "requester_ip",
+        "requester_user_agent",
+        "auth_method",
+        "consent_text",
+        "consent_hash",
+    ])
 
 class HomeView(TemplateView):
     template_name = "frontend/home.html"
@@ -160,40 +203,170 @@ class DocumentUploadView(LoginRequiredMixin, FormView):
         document.sha256_hash = calculate_sha256(form.cleaned_data["file"])
         document.status = Document.Status.UPLOADED
         document.save()
-        signing_request = None
 
-        if self.request.user.role == User.Role.CITIZEN:
-            signing_request = SigningRequest.objects.create(
-                document=document,
-                requested_by=self.request.user,
-                signer=self.request.user,
-                signing_type=SigningRequest.SigningType.REMOTE,
-                status=SigningRequest.Status.PENDING,
-            )
-
-            document.status = Document.Status.PENDING_SIGN
-            document.save(update_fields=["status", "updated_at"])
         try:
             log_action(
                 user=self.request.user,
                 action=AuditLog.Action.DOCUMENT_UPLOAD,
                 object_type="Document",
                 object_id=document.id,
-                detail={"title": document.title},
+                detail={
+                    "title": document.title,
+                    "sha256_hash": document.sha256_hash,
+                },
                 request=self.request,
             )
         except Exception:
             pass
-        if signing_request:
-            messages.success(
-                self.request,
-                "Document uploaded. A self-signing request has been created. Please sign the document."
+
+        messages.success(
+            self.request,
+            "Document uploaded successfully. Please choose Client Sign or Remote Sign."
+        )
+        return redirect("document-detail", pk=document.pk)
+
+class CreateClientSignRequestView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        document = get_object_or_404(Document.objects.select_related("owner"), pk=pk)
+
+        if request.user != document.owner:
+            return HttpResponseForbidden("Only document owner can create a client signing request.")
+
+        if request.user.role != User.Role.CITIZEN:
+            return HttpResponseForbidden("Only citizens can use client signing.")
+
+        if not request.user.is_verified_identity:
+            messages.error(request, "Your identity has not been verified.")
+            return redirect("document-detail", pk=document.pk)
+
+        if not has_active_certificate(request.user):
+            messages.error(request, "You do not have an active certificate.")
+            return redirect("document-detail", pk=document.pk)
+
+        existing = SigningRequest.objects.filter(
+            document=document,
+            signer=request.user,
+            signing_type=SigningRequest.SigningType.CLIENT,
+            status=SigningRequest.Status.PENDING,
+        ).first()
+
+        if existing:
+            messages.info(request, "A pending client signing request already exists.")
+            return redirect("signing-request-detail", pk=existing.pk)
+
+        signing_request = SigningRequest.objects.create(
+            document=document,
+            requested_by=request.user,
+            signer=request.user,
+            signing_type=SigningRequest.SigningType.CLIENT,
+            status=SigningRequest.Status.PENDING,
+            purpose=SigningRequest.SigningPurpose.CITIZEN_SELF_SIGN,
+        )
+
+        attach_non_repudiation_evidence(signing_request, request)
+        issue_client_signing_token(signing_request)
+
+        document.status = Document.Status.PENDING_SIGN
+        document.save(update_fields=["status", "updated_at"])
+
+        try:
+            log_action(
+                user=request.user,
+                action=AuditLog.Action.SIGNING_REQUEST_CREATED,
+                object_type="SigningRequest",
+                object_id=signing_request.id,
+                detail={
+                    "document_id": document.id,
+                    "signer_id": request.user.id,
+                    "signing_type": signing_request.signing_type,
+                    "purpose": signing_request.purpose,
+                    "request_document_hash": signing_request.request_document_hash,
+                    "consent_hash": signing_request.consent_hash,
+                },
+                request=request,
             )
-            return redirect("signing-request-detail", pk=signing_request.pk)
+        except Exception:
+            pass
 
-        messages.success(self.request, "Document uploaded successfully.")
-        return super().form_valid(form)
+        messages.success(request, "Client signing request created.")
+        return redirect("signing-request-detail", pk=signing_request.pk)
 
+class CreateRemoteOfficerRequestView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        document = get_object_or_404(Document.objects.select_related("owner"), pk=pk)
+
+        if request.user != document.owner:
+            return HttpResponseForbidden("Only document owner can request officer remote signing.")
+
+        if request.user.role != User.Role.CITIZEN:
+            return HttpResponseForbidden("Only citizens can request officer approval.")
+
+        if not request.user.is_verified_identity:
+            messages.error(request, "Your identity has not been verified.")
+            return redirect("document-detail", pk=document.pk)
+
+        if not has_active_certificate(request.user):
+            messages.error(request, "You do not have an active certificate.")
+            return redirect("document-detail", pk=document.pk)
+
+        officer = User.objects.filter(
+            role=User.Role.OFFICER,
+            is_verified_identity=True,
+            certificate_profile__status=UserCertificate.Status.ACTIVE,
+        ).first()
+
+        if not officer:
+            messages.error(request, "No verified officer with active certificate is available.")
+            return redirect("document-detail", pk=document.pk)
+
+        existing = SigningRequest.objects.filter(
+            document=document,
+            signer=officer,
+            signing_type=SigningRequest.SigningType.REMOTE,
+            status=SigningRequest.Status.PENDING,
+        ).first()
+
+        if existing:
+            messages.info(request, "A pending remote officer signing request already exists.")
+            return redirect("signing-request-detail", pk=existing.pk)
+
+        signing_request = SigningRequest.objects.create(
+            document=document,
+            requested_by=request.user,
+            signer=officer,
+            signing_type=SigningRequest.SigningType.REMOTE,
+            status=SigningRequest.Status.PENDING,
+            purpose=SigningRequest.SigningPurpose.OFFICER_APPROVAL,
+        )
+
+        attach_non_repudiation_evidence(signing_request, request)
+
+        document.status = Document.Status.PENDING_SIGN
+        document.save(update_fields=["status", "updated_at"])
+
+        try:
+            log_action(
+                user=request.user,
+                action=AuditLog.Action.SIGNING_REQUEST_CREATED,
+                object_type="SigningRequest",
+                object_id=signing_request.id,
+                detail={
+                    "document_id": document.id,
+                    "document_owner_id": document.owner_id,
+                    "requested_by_id": request.user.id,
+                    "signer_id": officer.id,
+                    "signing_type": signing_request.signing_type,
+                    "purpose": signing_request.purpose,
+                    "request_document_hash": signing_request.request_document_hash,
+                    "consent_hash": signing_request.consent_hash,
+                },
+                request=request,
+            )
+        except Exception:
+            pass
+
+        messages.success(request, "Remote officer signing request created.")
+        return redirect("signing-request-detail", pk=signing_request.pk)
 
 class SigningRequestListView(LoginRequiredMixin, ListView):
     template_name = "frontend/signing_requests.html"
@@ -252,6 +425,22 @@ class SigningRequestDetailView(LoginRequiredMixin, DetailView):
         context["is_expired"] = is_expired
         context["is_used"] = is_used
         context["is_officer_admin"] = self.request.user.role in {User.Role.OFFICER, User.Role.ADMIN}
+        context["client_signing_token"] = None
+        context["can_show_client_sign"] = False
+
+        if (
+            request_obj.signing_type == SigningRequest.SigningType.CLIENT
+            and is_pending
+            and not is_expired
+            and not is_used
+            and self.request.user == signer
+        ):
+            if not request_obj.client_token:
+                issue_client_signing_token(request_obj)
+                request_obj.refresh_from_db()
+
+            context["client_signing_token"] = request_obj.client_token
+            context["can_show_client_sign"] = True
         return context
 
 
@@ -292,6 +481,9 @@ class SigningRequestCreateView(LoginRequiredMixin, FormView):
         signing_request.signer = form.cleaned_data["signer"]
         signing_request.status = SigningRequest.Status.PENDING
         signing_request.save()
+        attach_non_repudiation_evidence(signing_request, self.request)
+        if signing_request.signing_type == SigningRequest.SigningType.CLIENT:
+            issue_client_signing_token(signing_request)
 
         signing_request.document.status = Document.Status.PENDING_SIGN
         signing_request.document.save(update_fields=["status", "updated_at"])
@@ -312,7 +504,7 @@ class SigningRequestCreateView(LoginRequiredMixin, FormView):
             pass
 
         messages.success(self.request, "Signing request created successfully.")
-        return super().form_valid(form)
+        return redirect("signing-request-detail", pk=signing_request.pk)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -365,8 +557,8 @@ class RemoteSignView(LoginRequiredMixin, View):
             if artifact_result.get("ok"):
                 messages.success(
                     request,
-                    f"Remote signing completed. Signature ID: {signature_record.id}. "
-                    "RAW/CAdES/PAdES artifacts were generated."
+                    f"PAdES signing completed. Signature ID: {signature_record.id}. "
+                    "The official signed PDF and LTV evidence package were generated."
                 )
             else:
                 messages.warning(
@@ -1321,13 +1513,15 @@ class CitizenGeneratedDocumentCreateView(LoginRequiredMixin, FormView):
             document=document,
             requested_by=user,
             signer=user,
-            signing_type=SigningRequest.SigningType.REMOTE,
+            signing_type=SigningRequest.SigningType.CLIENT,
             status=SigningRequest.Status.PENDING,
         )
 
+        issue_client_signing_token(signing_request)
+
         messages.success(
             self.request,
-            "Form PDF created. Please sign it as Citizen."
+            "Form PDF created. Please sign it using the local ML-DSA client signer."
         )
 
         return redirect("signing-request-detail", pk=signing_request.pk)
@@ -1359,12 +1553,13 @@ class PublicDocumentVerifyByQRView(View):
 
         is_generated_form = document.form_type == "citizen_generated_form"
 
-        official_hash = ""
-        fingerprint = ""
+        official_hash = (
+            getattr(document, "final_signed_pdf_sha256", "")
+            or getattr(document, "current_signed_pdf_sha256", "")
+            or document.sha256_hash
+        )
 
-        if is_generated_form:
-            official_hash = document.final_signed_pdf_sha256 or document.sha256_hash
-            fingerprint = short_fingerprint(official_hash)
+        fingerprint = short_fingerprint(official_hash) if official_hash else ""
 
         return {
             "document": document,
@@ -1393,11 +1588,6 @@ class PublicDocumentVerifyByQRView(View):
             verification_id=verification_id,
         )
 
-        if document.form_type != "citizen_generated_form":
-            return HttpResponseForbidden(
-                "PDF hash comparison is only enabled for generated form documents."
-            )
-
         uploaded_pdf = request.FILES.get("uploaded_pdf")
 
         if not uploaded_pdf:
@@ -1409,7 +1599,11 @@ class PublicDocumentVerifyByQRView(View):
             return render(request, self.template_name, context)
 
         uploaded_hash = calculate_sha256(uploaded_pdf)
-        official_hash = document.final_signed_pdf_sha256 or document.sha256_hash
+        official_hash = (
+            getattr(document, "final_signed_pdf_sha256", "")
+            or getattr(document, "current_signed_pdf_sha256", "")
+            or document.sha256_hash
+        )
 
         hash_match = uploaded_hash == official_hash
 

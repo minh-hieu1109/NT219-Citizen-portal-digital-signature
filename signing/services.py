@@ -3,10 +3,10 @@ import subprocess
 import tempfile
 from hashlib import sha256
 from pathlib import Path
-
-from django.conf import settings
+from datetime import timedelta
 from django.utils import timezone
-
+from django.conf import settings
+import secrets
 from accounts.models import UserCertificate, User
 from documents.models import Document
 from .models import SignatureRecord, SigningRequest
@@ -130,6 +130,15 @@ def create_officer_approval_request_after_citizen_sign(citizen_signing_request):
 
     return officer_request
 
+def get_document_input_path_for_signing(document):
+    if getattr(document, "current_signed_pdf", None) and document.current_signed_pdf:
+        return document.current_signed_pdf.path
+
+    if getattr(document, "final_signed_pdf", None) and document.final_signed_pdf:
+        return document.final_signed_pdf.path
+
+    return document.file.path
+
 def remote_sign_signing_request(signing_request: SigningRequest) -> SignatureRecord:
     signer = signing_request.signer
     if not signer:
@@ -188,7 +197,9 @@ def remote_sign_signing_request(signing_request: SigningRequest) -> SignatureRec
     if not document.file:
         raise ValueError("Document has no file attached.")
 
-    with open(document.file.path, "rb") as f:
+    input_path = get_document_input_path_for_signing(document)
+
+    with open(input_path, "rb") as f:
         file_bytes = f.read()
 
     file_hash_hex = sha256(file_bytes).hexdigest()
@@ -208,7 +219,7 @@ def remote_sign_signing_request(signing_request: SigningRequest) -> SignatureRec
     )
 
     try:
-        tsa_result = create_timestamp_token_for_file(document.file.path)
+        tsa_result = create_timestamp_token_for_file(input_path)
         signature_record.timestamp_token = tsa_result["timestamp_token_b64"]
         signature_record.timestamp_status = "valid" if tsa_result["ok"] else "invalid"
         signature_record.timestamp_message = tsa_result["message"]
@@ -262,10 +273,6 @@ def remote_sign_signing_request(signing_request: SigningRequest) -> SignatureRec
             + f"\nSequential PAdES failed: {str(e)}"
         )
         signature_record.save(update_fields=["timestamp_message"])
-
-    # Citizen vừa tự ký xong thì tự tạo request cho Officer
-    if signing_request.signer_id == document.owner_id:
-        create_officer_approval_request_after_citizen_sign(signing_request)
 
     return signature_record
 
@@ -366,14 +373,7 @@ def complete_client_signing_request(
         if not ok:
             raise ValueError("ML-DSA client signature verification failed.")
     else:
-        public_key = cert.public_key()
-        digest_bytes = bytes.fromhex(file_hash_hex)
-        public_key.verify(
-            signature_bytes,
-            digest_bytes,
-            padding.PKCS1v15(),
-            utils.Prehashed(hashes.SHA256()),
-        )
+        raise ValueError("Unsupported algorithm. This PoC allows ML-DSA-65 only.")
 
     signature_record = SignatureRecord.objects.create(
         signing_request=signing_request,
@@ -404,15 +404,47 @@ def complete_client_signing_request(
     document.save(update_fields=["status"])
 
     signing_request.status = SigningRequest.Status.SIGNED
+    signing_request.used_at = timezone.now()
     signing_request.completed_at = signature_record.signed_at
-    signing_request.save(update_fields=["status", "completed_at"])
+    signing_request.client_token = None
+    signing_request.client_token_expires_at = None
+    signing_request.save(update_fields=[
+        "status",
+        "used_at",
+        "completed_at",
+        "client_token",
+        "client_token_expires_at",
+    ])
+    create_officer_approval_request_after_citizen_sign(signing_request)
 
     try:
         archive_validation_evidence(signature_record)
     except Exception:
         # LTV archiving is best-effort in lab mode; signing result should remain available.
         pass
+    try:
+        generate_signature_artifacts(signature_record)
+    except Exception as e:
+        signature_record.timestamp_message = (
+            (signature_record.timestamp_message or "")
+            + f"\nArtifact generation failed: {str(e)}"
+        )
+        signature_record.save(update_fields=["timestamp_message"])
 
+    try:
+        pades_result = create_sequential_pades_for_signature_record(signature_record)
+        if not pades_result.get("ok"):
+            signature_record.timestamp_message = (
+                (signature_record.timestamp_message or "")
+                + f"\nSequential PAdES status: {pades_result.get('message', '')}"
+            )
+            signature_record.save(update_fields=["timestamp_message"])
+    except Exception as e:
+        signature_record.timestamp_message = (
+            (signature_record.timestamp_message or "")
+            + f"\nSequential PAdES failed: {str(e)}"
+        )
+        signature_record.save(update_fields=["timestamp_message"])
     return signature_record
 
 def get_active_user_certificate_for_signing(user) -> UserCertificate:
@@ -439,3 +471,17 @@ def get_active_user_certificate_for_signing(user) -> UserCertificate:
         raise ValueError("Signer certificate PEM is missing.")
 
     return user_cert
+
+def issue_client_signing_token(signing_request: SigningRequest) -> str:
+    if signing_request.signing_type != SigningRequest.SigningType.CLIENT:
+        raise ValueError("Only client signing requests can have client token.")
+
+    if signing_request.status != SigningRequest.Status.PENDING:
+        raise ValueError("Only pending requests can have client token.")
+
+    token = secrets.token_urlsafe(48)
+    signing_request.client_token = token
+    signing_request.client_token_expires_at = timezone.now() + timedelta(minutes=10)
+    signing_request.save(update_fields=["client_token", "client_token_expires_at"])
+
+    return token
