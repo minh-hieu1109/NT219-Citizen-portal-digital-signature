@@ -66,14 +66,14 @@ class SigningRequest(models.Model):
         null=True,
     )
     class SigningPurpose(models.TextChoices):
-        CITIZEN_SELF_SIGN = "citizen_self_sign", "Citizen self sign"
+        CITIZEN_LOCAL_SIGN = "citizen_local_sign", "Citizen local signing"
+        CITIZEN_REMOTE_SIGN = "citizen_remote_sign", "Citizen remote signing via TSP"
         OFFICER_APPROVAL = "officer_approval", "Officer approval"
-        REMOTE_TSP_SIGN = "remote_tsp_sign", "Remote TSP sign"
 
     purpose = models.CharField(
         max_length=50,
         choices=SigningPurpose.choices,
-        default=SigningPurpose.CITIZEN_SELF_SIGN,
+        default=SigningPurpose.CITIZEN_LOCAL_SIGN,
     )
 
     request_document_hash = models.CharField(max_length=64, blank=True)
@@ -95,6 +95,74 @@ class SigningRequest(models.Model):
     def __str__(self):
         return f"SigningRequest #{self.id} - {self.document.title} - {self.status}"
 
+class ClientPadesSession(models.Model):
+    class Status(models.TextChoices):
+        PREPARED = "prepared", "Prepared"
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+
+    signing_request = models.OneToOneField(
+        SigningRequest,
+        on_delete=models.CASCADE,
+        related_name="client_pades_session",
+    )
+
+    prepared_pdf = models.FileField(
+        upload_to="documents/pades/prepared/",
+        null=True,
+        blank=True,
+    )
+
+    prepared_pdf_sha256 = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+    )
+
+    document_digest = models.CharField(
+        max_length=128,
+        blank=True,
+        default="",
+    )
+
+    signed_attrs_b64 = models.TextField(
+        blank=True,
+        default="",
+    )
+
+    prepared_digest_blob = models.BinaryField(
+        null=True,
+        blank=True,
+    )
+
+    field_name = models.CharField(
+        max_length=120,
+        blank=True,
+        default="",
+    )
+
+    bytes_reserved = models.PositiveIntegerField(
+        default=65536,
+    )
+
+    digest_algorithm = models.CharField(
+        max_length=30,
+        default="sha512",
+    )
+
+    status = models.CharField(
+        max_length=30,
+        choices=Status.choices,
+        default=Status.PREPARED,
+    )
+
+    error_message = models.TextField(
+        blank=True,
+        default="",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
 
 class SignatureRecord(models.Model):
     signing_request = models.OneToOneField(
@@ -107,7 +175,11 @@ class SignatureRecord(models.Model):
     certificate_subject = models.CharField(max_length=255, blank=True)
     certificate_serial = models.CharField(max_length=255, blank=True)
     algorithm = models.CharField(max_length=100, default="ML-DSA-65")
-    signed_hash = models.CharField(max_length=64)
+    signed_hash = models.CharField(
+        max_length=128,
+        blank=True,
+        default="",
+    )
     signed_at = models.DateTimeField(auto_now_add=True)
 
     timestamp_token = models.TextField(blank=True)

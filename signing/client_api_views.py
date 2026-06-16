@@ -5,7 +5,7 @@ from django.views.decorators.http import require_GET, require_POST
 from django.utils import timezone
 from .models import SigningRequest
 from .services import complete_client_signing_request, prepare_client_signing_request
-
+from django.urls import reverse
 
 
 
@@ -47,25 +47,73 @@ def _get_request_by_client_session(request, request_id=None):
 
 @require_GET
 def pending_client_requests(request):
-    r, error = _get_request_by_client_session(request)
-    if error:
-        return error
+    token = request.headers.get("X-Client-Signing-Session", "").strip()
 
-    payload = prepare_client_signing_request(r)
+    if not token:
+        return JsonResponse(
+            {
+                "ok": False,
+                "error": "Missing X-Client-Signing-Session header.",
+            },
+            status=401,
+        )
 
-    return JsonResponse({
-        "ok": True,
-        "request": {
-            "request_id": r.id,
-            "document_id": r.document.id,
-            "document_title": r.document.title,
-            "document_hash": payload["digest_hex"],
-            "algorithm": payload["algorithm"],
-            "signer_email": r.signer.email,
-            "file_url": f"/api/signing/api/client/requests/{r.id}/file/",
-            "submit_url": f"/api/signing/api/client/requests/{r.id}/submit/",
-        }
-    })
+    now = timezone.now()
+
+    r = (
+        SigningRequest.objects
+        .select_related("document", "signer")
+        .filter(
+            signing_type=SigningRequest.SigningType.CLIENT,
+            status=SigningRequest.Status.PENDING,
+            client_token=token,
+            client_token_expires_at__gt=now,
+        )
+        .first()
+    )
+
+    if not r:
+        return JsonResponse(
+            {
+                "ok": True,
+                "request": None,
+            }
+        )
+
+    try:
+        payload = prepare_client_signing_request(r)
+
+        return JsonResponse({
+            "ok": True,
+            "request": {
+                "request_id": payload["signing_request_id"],
+                "document_id": payload["document_id"],
+                "document_title": payload["document_title"],
+                "algorithm": payload["algorithm"],
+
+                "mode": payload.get("mode", "pades_external_signing"),
+                "digest_algorithm": payload.get("digest_algorithm", "sha512"),
+                "document_digest": payload["document_digest"],
+                "document_hash": payload["document_digest"],
+                "field_name": payload.get("field_name", ""),
+                "signed_attrs_b64": payload["signed_attrs_b64"],
+                "certificate_serial": payload.get("certificate_serial", ""),
+
+                "submit_url": reverse(
+                    "client-submit-signature",
+                    args=[payload["signing_request_id"]],
+                ),
+            },
+        })
+
+    except Exception as e:
+        return JsonResponse(
+            {
+                "ok": False,
+                "error": f"Failed to prepare client PAdES signing session: {str(e)}",
+            },
+            status=500,
+        )
 
 
 @require_GET

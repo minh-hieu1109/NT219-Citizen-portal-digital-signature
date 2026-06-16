@@ -124,11 +124,11 @@
       </button>
     </form>
 
-    <form method="post" action="{% url 'document-remote-officer-request' document.pk %}" style="display:inline;">
-      {% csrf_token %}
-      <button type="submit" class="btn btn-secondary">
-        Request Remote Officer Signing
-      </button>
+    <form method="post" action="{% url 'document-citizen-remote-sign-request' document.pk %}" style="display:inline;">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-secondary">
+            Sign remotely via external TSP
+        </button>
     </form>
   </div>
 {% endif %}

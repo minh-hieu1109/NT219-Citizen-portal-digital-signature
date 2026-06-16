@@ -19,4 +19,14 @@ urlpatterns = [
     path("api/client/pending/", client_api_views.pending_client_requests, name="client_pending_requests"),
     path("api/client/requests/<int:request_id>/file/", client_api_views.client_request_file, name="client_request_file"),
     path("api/client/requests/<int:request_id>/submit/", client_api_views.submit_client_signature, name="submit_client_signature"),
+        path(
+        "api/client/pending/",
+        client_api_views.pending_client_requests,
+        name="client-pending-requests",
+    ),
+    path(
+        "api/client/<int:request_id>/submit/",
+        client_api_views.submit_client_signature,
+        name="client-submit-signature",
+    ),
 ]

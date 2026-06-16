@@ -30,7 +30,11 @@ class Document(models.Model):
         null=True,
         blank=True,
     )
-
+    current_signed_pdf_sha256 = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+    )
     final_signed_pdf = models.FileField(
         upload_to="documents/pades/final/",
         null=True,

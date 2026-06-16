@@ -18,7 +18,8 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, utils
 from signing.artifact_services import generate_signature_artifacts
 from signing.mldsa_openssl import mldsa_verify_with_cert_pem
-
+from signing.external_tsp_client import external_tsp_sign
+from django.core.files.base import ContentFile
 def create_timestamp_token_for_file(file_path: str) -> dict:
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
@@ -92,11 +93,9 @@ def create_officer_approval_request_after_citizen_sign(citizen_signing_request):
     document = citizen_signing_request.document
     citizen = citizen_signing_request.signer
 
-    # Chỉ auto chuyển nếu người vừa ký là owner của document
     if document.owner_id != citizen.id:
         return None
 
-    # Nếu đã có request Officer/Admin pending hoặc signed rồi thì không tạo nữa
     existing_officer_request = SigningRequest.objects.filter(
         document=document,
         signer__role__in=[User.Role.OFFICER, User.Role.ADMIN],
@@ -109,7 +108,6 @@ def create_officer_approval_request_after_citizen_sign(citizen_signing_request):
     if existing_officer_request:
         return existing_officer_request
 
-    # Chọn Officer có cert active
     officer = User.objects.filter(
         role=User.Role.OFFICER,
         is_verified_identity=True,
@@ -117,7 +115,6 @@ def create_officer_approval_request_after_citizen_sign(citizen_signing_request):
     ).first()
 
     if not officer:
-        # Không có officer phù hợp thì thôi, document vẫn ở pending_sign
         return None
 
     officer_request = SigningRequest.objects.create(
@@ -126,8 +123,33 @@ def create_officer_approval_request_after_citizen_sign(citizen_signing_request):
         signer=officer,
         signing_type=SigningRequest.SigningType.REMOTE,
         status=SigningRequest.Status.PENDING,
+        purpose=SigningRequest.SigningPurpose.OFFICER_APPROVAL,
+    )
+    input_hash = (
+        getattr(document, "current_signed_pdf_sha256", "")
+        or document.sha256_hash
+        or ""
     )
 
+    consent_text = (
+        f"Officer approval request created after citizen signature. "
+        f"citizen_signing_request_id={citizen_signing_request.id}, "
+        f"document_id={document.id}, "
+        f"document_hash={input_hash}"
+    )
+
+    officer_request.request_document_hash = input_hash
+    officer_request.request_nonce = secrets.token_urlsafe(32)
+    officer_request.auth_method = "system_after_citizen_signature"
+    officer_request.consent_text = consent_text
+    officer_request.consent_hash = sha256(consent_text.encode("utf-8")).hexdigest()
+    officer_request.save(update_fields=[
+        "request_document_hash",
+        "request_nonce",
+        "auth_method",
+        "consent_text",
+        "consent_hash",
+    ])
     return officer_request
 
 def get_document_input_path_for_signing(document):
@@ -148,6 +170,7 @@ def remote_sign_signing_request(signing_request: SigningRequest) -> SignatureRec
         raise ValueError("This signing request is not a remote signing request.")
 
     now = timezone.now()
+
     if signing_request.expires_at and now > signing_request.expires_at:
         raise ValueError("Signing request has expired.")
 
@@ -204,8 +227,24 @@ def remote_sign_signing_request(signing_request: SigningRequest) -> SignatureRec
 
     file_hash_hex = sha256(file_bytes).hexdigest()
 
-    signer_backend = get_signer_backend(user_cert)
-    signature_bytes = signer_backend.sign(user_cert, file_bytes)
+    allowed_remote_purposes = [
+        SigningRequest.SigningPurpose.CITIZEN_REMOTE_SIGN,
+        SigningRequest.SigningPurpose.OFFICER_APPROVAL,
+    ]
+
+    if signing_request.purpose not in allowed_remote_purposes:
+        raise ValueError(
+            f"Unsupported remote signing purpose: {signing_request.purpose}"
+        )
+
+    # Portal không tự giữ private key.
+    # Hàm này mô phỏng việc Portal gọi external TSP/HSM để ký.
+    signature_bytes = external_tsp_sign(
+        signing_request=signing_request,
+        user_cert=user_cert,
+        data=file_bytes,
+    )
+
     signature_b64 = base64.b64encode(signature_bytes).decode("utf-8")
 
     signature_record = SignatureRecord.objects.create(
@@ -233,10 +272,10 @@ def remote_sign_signing_request(signing_request: SigningRequest) -> SignatureRec
             update_fields=["timestamp_status", "timestamp_message"]
         )
 
-    if signing_request.signer_id == document.owner_id:
-        document.status = Document.Status.PENDING_SIGN
-    else:
+    if signing_request.purpose == SigningRequest.SigningPurpose.OFFICER_APPROVAL:
         document.status = Document.Status.SIGNED
+    else:
+        document.status = Document.Status.PENDING_SIGN
 
     document.save(update_fields=["status"])
 
@@ -259,14 +298,19 @@ def remote_sign_signing_request(signing_request: SigningRequest) -> SignatureRec
         )
         signature_record.save(update_fields=["timestamp_message"])
 
+    pades_ok = False
+
     try:
         pades_result = create_sequential_pades_for_signature_record(signature_record)
-        if not pades_result.get("ok"):
+        pades_ok = bool(pades_result.get("ok"))
+
+        if not pades_ok:
             signature_record.timestamp_message = (
                 (signature_record.timestamp_message or "")
                 + f"\nSequential PAdES status: {pades_result.get('message', '')}"
             )
             signature_record.save(update_fields=["timestamp_message"])
+
     except Exception as e:
         signature_record.timestamp_message = (
             (signature_record.timestamp_message or "")
@@ -274,8 +318,13 @@ def remote_sign_signing_request(signing_request: SigningRequest) -> SignatureRec
         )
         signature_record.save(update_fields=["timestamp_message"])
 
-    return signature_record
+    if (
+        pades_ok
+        and signing_request.purpose == SigningRequest.SigningPurpose.CITIZEN_REMOTE_SIGN
+    ):
+        create_officer_approval_request_after_citizen_sign(signing_request)
 
+    return signature_record
 
 def sign_hash_value(hash_value: str, private_key_path: str) -> str:
     raise NotImplementedError(
@@ -296,132 +345,45 @@ def prepare_client_signing_request(signing_request: SigningRequest) -> dict:
     if hasattr(signing_request, "signature_record"):
         raise ValueError("This signing request has already been signed.")
 
-    user_cert = get_active_user_certificate_for_signing(signer)
+    from signing.pades_external_client_services import prepare_client_pades_session
 
-    document = signing_request.document
-    if not document.file:
-        raise ValueError("Document has no file attached.")
-
-    with open(document.file.path, "rb") as f:
-        file_bytes = f.read()
-
-    file_hash_hex = sha256(file_bytes).hexdigest()
+    session = prepare_client_pades_session(signing_request)
 
     return {
         "signing_request_id": signing_request.id,
-        "document_id": document.id,
-        "document_title": document.title,
-        "digest_hex": file_hash_hex,
+        "document_id": signing_request.document.id,
+        "document_title": signing_request.document.title,
         "algorithm": "ML-DSA-65",
-        "certificate_serial": user_cert.certificate_serial,
+        "mode": "pades_external_signing",
+        "digest_algorithm": session.digest_algorithm,
+        "document_digest": session.document_digest,
+        "field_name": session.field_name,
+        "signed_attrs_b64": session.signed_attrs_b64,
+        "certificate_serial": signing_request.signer.certificate_profile.certificate_serial,
     }
-
 
 def complete_client_signing_request(
     signing_request: SigningRequest,
     signature_b64: str,
     algorithm: str = "ML-DSA-65",
 ) -> SignatureRecord:
-    signer = signing_request.signer
-    if not signer:
-        raise ValueError("Signing request does not have a signer assigned.")
-
-    if signing_request.signing_type != SigningRequest.SigningType.CLIENT:
-        raise ValueError("This signing request is not a client signing request.")
-
-    if signing_request.status != SigningRequest.Status.PENDING:
-        raise ValueError("This signing request is not in pending status.")
-
-    if hasattr(signing_request, "signature_record"):
-        raise ValueError("This signing request has already been signed.")
-
-    user_cert = get_active_user_certificate_for_signing(signer)
-
-    document = signing_request.document
-    if not document.file:
-        raise ValueError("Document has no file attached.")
-
-    with open(document.file.path, "rb") as f:
-        file_bytes = f.read()
-
-    file_hash_hex = sha256(file_bytes).hexdigest()
-    
-    try:
-        signature_bytes = base64.b64decode(signature_b64)
-    except Exception:
-        raise ValueError("Invalid base64 signature_value.")
-
-    cert = x509.load_pem_x509_certificate(user_cert.certificate_pem.encode("utf-8"))
-
-    cert_serial_hex = format(cert.serial_number, "X").upper()
-    stored_serial = str(user_cert.certificate_serial or "").replace(":", "").upper()
-
-    if cert_serial_hex != stored_serial:
-        raise ValueError(
-            "Stored certificate does not match signer certificate serial. "
-            f"cert_serial_hex={cert_serial_hex}, stored_serial={stored_serial}"
-        )
-
     algorithm = (algorithm or "").strip().upper()
 
-    if algorithm in ["ML-DSA-65", "MLDSA-65"]:
-        ok = mldsa_verify_with_cert_pem(
-            cert_pem=user_cert.certificate_pem,
-            data=file_bytes,
-            signature=signature_bytes,
-        )
-        if not ok:
-            raise ValueError("ML-DSA client signature verification failed.")
-    else:
+    if algorithm not in ["ML-DSA-65", "MLDSA-65"]:
         raise ValueError("Unsupported algorithm. This PoC allows ML-DSA-65 only.")
 
-    signature_record = SignatureRecord.objects.create(
+    from signing.pades_external_client_services import finish_client_pades_session
+
+    signature_record = finish_client_pades_session(
         signing_request=signing_request,
-        signature_value=signature_b64,
-        certificate_pem=user_cert.certificate_pem,
-        certificate_subject=user_cert.certificate_subject or cert.subject.rfc4514_string(),
-        certificate_serial=user_cert.certificate_serial or str(cert.serial_number),
-        algorithm=algorithm,
-        signed_hash=file_hash_hex,
+        signature_b64=signature_b64,
     )
-
-    try:
-        tsa_result = create_timestamp_token_for_file(document.file.path)
-        signature_record.timestamp_token = tsa_result["timestamp_token_b64"]
-        signature_record.timestamp_status = "valid" if tsa_result["ok"] else "invalid"
-        signature_record.timestamp_message = tsa_result["message"]
-        signature_record.save(
-            update_fields=["timestamp_token", "timestamp_status", "timestamp_message"]
-        )
-    except Exception as e:
-        signature_record.timestamp_status = "error"
-        signature_record.timestamp_message = f"Timestamping failed: {str(e)}"
-        signature_record.save(
-            update_fields=["timestamp_status", "timestamp_message"]
-        )
-
-    document.status = Document.Status.SIGNED
-    document.save(update_fields=["status"])
-
-    signing_request.status = SigningRequest.Status.SIGNED
-    signing_request.used_at = timezone.now()
-    signing_request.completed_at = signature_record.signed_at
-    signing_request.client_token = None
-    signing_request.client_token_expires_at = None
-    signing_request.save(update_fields=[
-        "status",
-        "used_at",
-        "completed_at",
-        "client_token",
-        "client_token_expires_at",
-    ])
-    create_officer_approval_request_after_citizen_sign(signing_request)
 
     try:
         archive_validation_evidence(signature_record)
     except Exception:
-        # LTV archiving is best-effort in lab mode; signing result should remain available.
         pass
+
     try:
         generate_signature_artifacts(signature_record)
     except Exception as e:
@@ -431,20 +393,16 @@ def complete_client_signing_request(
         )
         signature_record.save(update_fields=["timestamp_message"])
 
-    try:
-        pades_result = create_sequential_pades_for_signature_record(signature_record)
-        if not pades_result.get("ok"):
-            signature_record.timestamp_message = (
-                (signature_record.timestamp_message or "")
-                + f"\nSequential PAdES status: {pades_result.get('message', '')}"
-            )
-            signature_record.save(update_fields=["timestamp_message"])
-    except Exception as e:
+    officer_request = create_officer_approval_request_after_citizen_sign(signing_request)
+
+    if officer_request is None:
         signature_record.timestamp_message = (
             (signature_record.timestamp_message or "")
-            + f"\nSequential PAdES failed: {str(e)}"
+            + "\nOfficer approval request was not created. "
+            + "Check whether an active verified officer certificate exists."
         )
         signature_record.save(update_fields=["timestamp_message"])
+
     return signature_record
 
 def get_active_user_certificate_for_signing(user) -> UserCertificate:

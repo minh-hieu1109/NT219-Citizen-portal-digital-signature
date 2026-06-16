@@ -260,7 +260,7 @@ class CreateClientSignRequestView(LoginRequiredMixin, View):
             signer=request.user,
             signing_type=SigningRequest.SigningType.CLIENT,
             status=SigningRequest.Status.PENDING,
-            purpose=SigningRequest.SigningPurpose.CITIZEN_SELF_SIGN,
+            purpose=SigningRequest.SigningPurpose.CITIZEN_LOCAL_SIGN,
         )
 
         attach_non_repudiation_evidence(signing_request, request)
@@ -1622,3 +1622,75 @@ class PublicDocumentVerifyByQRView(View):
 
         context = self.build_context(document, compare_result)
         return render(request, self.template_name, context)
+    
+class CreateCitizenRemoteSignRequestView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        document = get_object_or_404(Document.objects.select_related("owner"), pk=pk)
+
+        if request.user != document.owner:
+            return HttpResponseForbidden("Only document owner can request citizen remote signing.")
+
+        if request.user.role != User.Role.CITIZEN:
+            return HttpResponseForbidden("Only citizens can use citizen remote signing.")
+
+        if not request.user.is_verified_identity:
+            messages.error(request, "Your identity has not been verified.")
+            return redirect("document-detail", pk=document.pk)
+
+        if not has_active_certificate(request.user):
+            messages.error(request, "You do not have an active certificate.")
+            return redirect("document-detail", pk=document.pk)
+
+        existing = SigningRequest.objects.filter(
+            document=document,
+            signer=request.user,
+            signing_type=SigningRequest.SigningType.REMOTE,
+            status=SigningRequest.Status.PENDING,
+            purpose=SigningRequest.SigningPurpose.CITIZEN_REMOTE_SIGN,
+        ).first()
+
+        if existing:
+            messages.info(request, "A pending citizen remote signing request already exists.")
+            return redirect("signing-request-detail", pk=existing.pk)
+
+        signing_request = SigningRequest.objects.create(
+            document=document,
+            requested_by=request.user,
+            signer=request.user,
+            signing_type=SigningRequest.SigningType.REMOTE,
+            status=SigningRequest.Status.PENDING,
+            purpose=SigningRequest.SigningPurpose.CITIZEN_REMOTE_SIGN,
+        )
+
+        attach_non_repudiation_evidence(signing_request, request)
+
+        document.status = Document.Status.PENDING_SIGN
+        document.save(update_fields=["status", "updated_at"])
+
+        try:
+            log_action(
+                user=request.user,
+                action=AuditLog.Action.SIGNING_REQUEST_CREATED,
+                object_type="SigningRequest",
+                object_id=signing_request.id,
+                detail={
+                    "document_id": document.id,
+                    "document_owner_id": document.owner_id,
+                    "requested_by_id": request.user.id,
+                    "signer_id": request.user.id,
+                    "signing_type": signing_request.signing_type,
+                    "purpose": signing_request.purpose,
+                    "request_document_hash": signing_request.request_document_hash,
+                    "consent_hash": signing_request.consent_hash,
+                    "remote_provider": "external_tsp_simulator",
+                },
+                request=request,
+            )
+        except Exception:
+            pass
+
+        messages.success(
+            request,
+            "Citizen remote signing request created. Please confirm remote signing."
+        )
+        return redirect("signing-request-detail", pk=signing_request.pk)
