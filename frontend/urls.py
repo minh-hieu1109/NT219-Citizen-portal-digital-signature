@@ -23,6 +23,9 @@ from .views import (
     CreateClientSignRequestView,
     CreateRemoteOfficerRequestView,
     CreateCitizenRemoteSignRequestView,
+    ConfirmClientPairingView,
+    DownloadSignedDocumentView,
+    SubmitAuthoritySigningRequestView,
 )
 
 urlpatterns = [
@@ -48,4 +51,19 @@ urlpatterns = [
     path("documents/<int:pk>/client-sign/request/",CreateClientSignRequestView.as_view(), name="document-client-sign-request"),
     path("documents/<int:pk>/remote-officer/request/",CreateRemoteOfficerRequestView.as_view(),name="document-remote-officer-request"),
     path("documents/<int:pk>/citizen-remote-sign/request/", CreateCitizenRemoteSignRequestView.as_view(), name="document-citizen-remote-sign-request"),
+    path(
+        "signing-requests/<int:pk>/confirm-client-pairing/",
+        ConfirmClientPairingView.as_view(),
+        name="confirm-client-pairing",
+    ),
+    path(
+        "documents/<int:pk>/download-signed/<str:kind>/",
+        DownloadSignedDocumentView.as_view(),
+        name="download-signed-document",
+    ),
+    path(
+        "documents/<int:pk>/submit-authority-signing/",
+        SubmitAuthoritySigningRequestView.as_view(),
+        name="document-submit-authority-signing",
+    ),
 ]

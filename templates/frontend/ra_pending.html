@@ -1,140 +1,126 @@
-﻿{% extends 'base.html' %}
+{% extends 'base.html' %}
+{% block title %}RA Panel | Citizen Portal ML-DSA{% endblock %}
 
 {% block content %}
-<h2>RA Panel</h2>
+<div class="page-header">
+  <h2>RA Panel</h2>
+  <p class="muted">
+    RA verifies citizen identity and manages certificate status metadata. This UI does not ask users to upload private keys.
+  </p>
+</div>
 
-<h3>Pending identity verification</h3>
-
-{% if pending_users %}
-<table border="1" cellpadding="8" cellspacing="0">
-    <thead>
+<div class="card">
+  <h3>Pending identity verification</h3>
+  {% if pending_users %}
+    <table class="table">
+      <thead>
         <tr>
-            <th>ID</th>
-            <th>Email</th>
-            <th>Role</th>
-            <th>Citizen ID</th>
-            <th>Created</th>
-            <th>Actions</th>
+          <th>ID</th>
+          <th>Email</th>
+          <th>Full name</th>
+          <th>Citizen ID</th>
+          <th>Created</th>
+          <th>Action</th>
         </tr>
-    </thead>
-    <tbody>
-    {% for u in pending_users %}
-        <tr>
-            <td>{{ u.id }}</td>
-            <td>{{ u.email }}</td>
-            <td>{{ u.role }}</td>
-            <td>{{ u.citizen_id }}</td>
-            <td>{{ u.created_at|date:'Y-m-d H:i:s' }}</td>
+      </thead>
+      <tbody>
+        {% for item in pending_users %}
+          <tr>
+            <td>#{{ item.id }}</td>
+            <td>{{ item.email }}</td>
+            <td>{{ item.full_name|default:"-" }}</td>
+            <td>{{ item.citizen_id|default:"-" }}</td>
+            <td>{{ item.created_at|date:"Y-m-d H:i" }}</td>
             <td>
-                <form method="post" action="{% url 'ra-action' u.id 'verify' %}" style="display:inline;">
-                    {% csrf_token %}
-                    <button type="submit">Verify</button>
+              <form method="post" action="{% url 'ra-action' item.id 'verify' %}" style="display:inline;">
+                {% csrf_token %}
+                <button class="button small" type="submit">Verify identity</button>
+              </form>
+              <form method="post" action="{% url 'ra-action' item.id 'reject' %}" style="display:inline;">
+                {% csrf_token %}
+                <button class="button small secondary" type="submit">Reject</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>No pending users.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3>Verified users without certificate profile</h3>
+  <p class="muted">
+    These users are identity-verified but do not have an active certificate profile in the portal database yet.
+    In the client-side model, key generation should happen outside the portal; the portal should only store/import the public certificate.
+  </p>
+
+  {% if verified_without_cert_users %}
+    <table class="table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Email</th>
+          <th>Role</th>
+          <th>Verified</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in verified_without_cert_users %}
+          <tr>
+            <td>#{{ item.id }}</td>
+            <td>{{ item.email }}</td>
+            <td>{{ item.role }}</td>
+            <td>{% if item.is_verified_identity %}Yes{% else %}No{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>No verified users missing certificate profile.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3>Certificate profiles</h3>
+  {% if cert_users %}
+    <table class="table">
+      <thead>
+        <tr>
+          <th>User</th>
+          <th>Role</th>
+          <th>Status</th>
+          <th>Serial</th>
+          <th>Subject</th>
+          <th>Revoke</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in cert_users %}
+          <tr>
+            <td>{{ item.email }}</td>
+            <td>{{ item.role }}</td>
+            <td>{{ item.certificate_profile.status }}</td>
+            <td class="mono">{{ item.certificate_profile.certificate_serial|default:"-" }}</td>
+            <td>{{ item.certificate_profile.certificate_subject|default:"-" }}</td>
+            <td>
+              {% if item.certificate_profile.status != "revoked" %}
+                <form method="post" action="{% url 'ra-action' item.id 'revoke' %}">
+                  {% csrf_token %}
+                  <button class="button small secondary" type="submit">Revoke</button>
                 </form>
-
-                <form method="post" action="{% url 'ra-action' u.id 'reject' %}" style="display:inline;">
-                    {% csrf_token %}
-                    <button type="submit">Reject</button>
-                </form>
+              {% else %}
+                Revoked
+              {% endif %}
             </td>
-        </tr>
-    {% endfor %}
-    </tbody>
-</table>
-{% else %}
-<p>No pending citizens.</p>
-{% endif %}
-
-<hr>
-
-<h3>Verified users without certificate</h3>
-
-{% if verified_without_cert_users %}
-<table border="1" cellpadding="8" cellspacing="0">
-    <thead>
-        <tr>
-            <th>ID</th>
-            <th>Email</th>
-            <th>Role</th>
-            <th>Verified</th>
-            <th>Actions</th>
-        </tr>
-    </thead>
-    <tbody>
-    {% for u in verified_without_cert_users %}
-        <tr>
-            <td>{{ u.id }}</td>
-            <td>{{ u.email }}</td>
-            <td>{{ u.role }}</td>
-            <td>{{ u.is_verified_identity }}</td>
-            <td>
-                <form method="post" action="{% url 'ra-action' u.id 'issue' %}" style="display:inline;">
-                    {% csrf_token %}
-                    <button type="submit">Issue Cert</button>
-                </form>
-            </td>
-        </tr>
-    {% endfor %}
-    </tbody>
-</table>
-{% else %}
-<p>All verified users already have a certificate.</p>
-{% endif %}
-
-<hr>
-
-<h3>Users with certificate</h3>
-
-{% if cert_users %}
-<table border="1" cellpadding="8" cellspacing="0">
-    <thead>
-        <tr>
-            <th>ID</th>
-            <th>Email</th>
-            <th>Role</th>
-            <th>Cert Serial</th>
-            <th>Status</th>
-            <th>Valid To</th>
-            <th>Actions</th>
-        </tr>
-    </thead>
-    <tbody>
-    {% for u in cert_users %}
-        <tr>
-            <td>{{ u.id }}</td>
-            <td>{{ u.email }}</td>
-            <td>{{ u.role }}</td>
-            <td style="max-width: 260px; word-break: break-all;">
-                {{ u.certificate_profile.certificate_serial }}
-            </td>
-            <td>
-                <strong>{{ u.certificate_profile.status }}</strong>
-            </td>
-            <td>{{ u.certificate_profile.valid_to|date:'Y-m-d H:i:s' }}</td>
-            <td>
-                {% if u.certificate_profile.status == 'active' %}
-                    <form method="post" action="{% url 'ra-action' u.id 'revoke' %}" style="display:inline;">
-                        {% csrf_token %}
-                        <button
-                            type="submit"
-                            onclick="return confirm('Revoke this certificate? This action should not be undone.');"
-                        >
-                            Revoke Cert
-                        </button>
-                    </form>
-                {% elif u.certificate_profile.status == 'revoked' %}
-                    Revoked
-                {% elif u.certificate_profile.status == 'expired' %}
-                    Expired
-                {% else %}
-                    -
-                {% endif %}
-            </td>
-        </tr>
-    {% endfor %}
-    </tbody>
-</table>
-{% else %}
-<p>No certificates found.</p>
-{% endif %}
-
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>No certificate profiles found.</p>
+  {% endif %}
+</div>
 {% endblock %}

@@ -1,60 +1,67 @@
-﻿{% load static %}
+{% load static %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Citizen Portal Demo</title>
-    <link rel="stylesheet" href="{% static 'css/styles.css' %}">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Citizen Portal ML-DSA{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'css/styles.css' %}">
 </head>
 <body>
-    <header class="site-header">
-        <div class="container topbar">
-            <h1><a href="{% url 'home' %}">Citizen Portal Demo</a></h1>
-            <nav>
-                <a href="{% url 'home' %}">Dashboard</a>
-                {% if user.is_authenticated and user.role == "citizen" %}
-                    <a class="nav-link" href="{% url 'create-generated-document' %}">
-                        Create Form
-                    </a>
-                {% endif %}
-                <a href="{% url 'public-verify-upload' %}">Public Verify</a>
-                {% if user.is_authenticated %}
-                    <a href="{% url 'document-list' %}">Documents</a>
-                    <a href="{% url 'signing-request-list' %}">Signing</a>
-                    <a href="{% url 'verification-result-list' %}">Verification</a>
-                    {% if user.role == 'officer' or user.role == 'admin' %}
-                        <a href="{% url 'ra-pending' %}">RA Panel</a>
-                        <a href="{% url 'audit-log-list' %}">Audit</a>
-                    {% endif %}
-                    <a href="/admin/">Admin</a>
-                    <form method="post" action="{% url 'logout' %}" style="display:inline;">
-                        {% csrf_token %}
-                        <button type="submit" class="nav-button">Logout</button>
-                    </form>
-                {% else %}
-                    <a href="{% url 'login' %}">Login</a>
-                    <a href="{% url 'register' %}">Register</a>
-                {% endif %}
-            </nav>
-        </div>
-    </header>
+  <header class="site-header">
+    <div class="container topbar">
+      <h1><a href="{% url 'home' %}">Citizen Portal ML-DSA</a></h1>
 
-    <main class="container">
-        {% if messages %}
-            <div class="messages">
-                {% for message in messages %}
-                    <div class="message {{ message.tags }}">{{ message }}</div>
-                {% endfor %}
-            </div>
+      <nav>
+        <a href="{% url 'home' %}">Dashboard</a>
+        <a href="{% url 'public-verify-upload' %}">Public Verify</a>
+
+        {% if user.is_authenticated %}
+          <a href="{% url 'document-list' %}">Documents</a>
+          <a href="{% url 'signing-request-list' %}">Signing Requests</a>
+          <a href="{% url 'verification-result-list' %}">Verification</a>
+
+          {% if user.role == "citizen" %}
+            <a href="{% url 'create-generated-document' %}">Create Form</a>
+          {% endif %}
+
+          {% if user.role == "officer" or user.role == "admin" %}
+            <a href="{% url 'ra-pending' %}">RA Panel</a>
+            <a href="{% url 'audit-log-list' %}">Audit</a>
+          {% endif %}
+
+          {% if user.role == "admin" %}
+            <a href="/admin/">Django Admin</a>
+          {% endif %}
+
+          <form method="post" action="{% url 'logout' %}" style="display:inline;">
+            {% csrf_token %}
+            <button type="submit" class="nav-button">Logout</button>
+          </form>
+        {% else %}
+          <a href="{% url 'login' %}">Login</a>
+          <a href="{% url 'register' %}">Register</a>
         {% endif %}
-        {% block content %}{% endblock %}
-    </main>
+      </nav>
+    </div>
+  </header>
 
-    <footer class="site-footer">
-        <div class="container">
-            <small>Demo checklist: docs/demo_checklist.md | Demo guide: README_DEMO.md</small>
-        </div>
-    </footer>
+  <main class="container">
+    {% if messages %}
+      <div class="messages">
+        {% for message in messages %}
+          <div class="message {{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <small>ML-DSA citizen-side signing demo. Private keys stay outside the portal server.</small>
+    </div>
+  </footer>
 </body>
 </html>

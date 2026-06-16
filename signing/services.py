@@ -20,6 +20,67 @@ from signing.artifact_services import generate_signature_artifacts
 from signing.mldsa_openssl import mldsa_verify_with_cert_pem
 from signing.external_tsp_client import external_tsp_sign
 from django.core.files.base import ContentFile
+import re
+
+
+def normalize_pairing_code(code: str) -> str:
+    return re.sub(r"[^A-Z0-9]", "", (code or "").upper())
+
+
+def hash_pairing_code(code: str) -> str:
+    normalized = normalize_pairing_code(code)
+    pepper = settings.SECRET_KEY
+    return sha256(f"{normalized}:{pepper}".encode("utf-8")).hexdigest()
+
+
+def format_pairing_code(raw: str) -> str:
+    raw = normalize_pairing_code(raw)
+    return f"{raw[:4]}-{raw[4:]}"
+
+
+def generate_pairing_code() -> str:
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    raw = "".join(secrets.choice(alphabet) for _ in range(8))
+    return format_pairing_code(raw)
+
+
+def issue_client_pairing_session(signing_request: SigningRequest) -> str:
+    if signing_request.signing_type != SigningRequest.SigningType.CLIENT:
+        raise ValueError("Only client signing requests can have pairing code.")
+
+    if signing_request.status != SigningRequest.Status.PENDING:
+        raise ValueError("Only pending requests can have pairing code.")
+
+    pairing_code = generate_pairing_code()
+
+    signing_request.client_token = secrets.token_urlsafe(48)
+    signing_request.client_token_expires_at = timezone.now() + timedelta(minutes=10)
+
+    signing_request.pairing_code_hash = hash_pairing_code(pairing_code)
+    signing_request.pairing_code_expires_at = timezone.now() + timedelta(minutes=10)
+    signing_request.pairing_status = SigningRequest.PairingStatus.WAITING_DEVICE
+    signing_request.pairing_attempts = 0
+
+    signing_request.paired_at = None
+    signing_request.pairing_confirmed_at = None
+    signing_request.signer_device_name = ""
+    signing_request.signer_device_public_key_pem = ""
+
+    signing_request.save(update_fields=[
+        "client_token",
+        "client_token_expires_at",
+        "pairing_code_hash",
+        "pairing_code_expires_at",
+        "pairing_status",
+        "pairing_attempts",
+        "paired_at",
+        "pairing_confirmed_at",
+        "signer_device_name",
+        "signer_device_public_key_pem",
+    ])
+
+    return pairing_code
+
 def create_timestamp_token_for_file(file_path: str) -> dict:
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)

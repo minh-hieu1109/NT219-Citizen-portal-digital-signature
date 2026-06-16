@@ -1,28 +1,42 @@
 {% extends 'base.html' %}
+{% block title %}Client Signing Instructions | Citizen Portal ML-DSA{% endblock %}
 
 {% block content %}
 <div class="page-header">
-    <h2>Client Signing Instructions</h2>
-    <p>Use the local client signing script to complete this request.</p>
+  <h2>Client ML-DSA signing</h2>
+  <p class="muted">Request #{{ signing_request.id }} · {{ signing_request.document.title }}</p>
 </div>
 
 <div class="card">
-    <p><strong>Request ID:</strong> {{ signing_request.id }}</p>
-    <p><strong>Document:</strong> {{ signing_request.document.title }}</p>
-    <p><strong>Signing type:</strong> {{ signing_request.get_signing_type_display }}</p>
-    <p><strong>Status:</strong> {{ signing_request.get_status_display }}</p>
+  <h3>What this step does</h3>
+  <ol>
+    <li>The portal prepares PAdES signed attributes for this request.</li>
+    <li>The local signer app fetches the pending session using the short-lived token.</li>
+    <li>The local signer signs with the citizen private key.</li>
+    <li>The portal verifies the ML-DSA signature with the public certificate.</li>
+    <li>If valid, the portal embeds the signature into the PDF.</li>
+  </ol>
 </div>
 
 <div class="card">
-    <h3>Steps</h3>
-    <ol>
-        <li>Generate or use existing local key and certificate via script.</li>
-        <li>Run <code>python tools/client_file_sign_app.py</code> after cấu hình email/password và request id.</li>
-        <li>Nếu cần, mở <code>tools/client_enroll_file.py</code> để đăng ký certificate.</li>
-    </ol>
+  <h3>Run the local signer</h3>
+  <pre class="mono">python client-signer-local/client_signer_gui.py</pre>
+  <p>
+    Paste the token shown on the signing request detail page into the local signer app.
+    Do not share this token. It is not the private key, but it grants temporary access to this signing session.
+  </p>
+</div>
+
+<div class="card">
+  <h3>Request summary</h3>
+  <p><strong>Signer:</strong> {{ signing_request.signer.email }}</p>
+  <p><strong>Type:</strong> {{ signing_request.get_signing_type_display }}</p>
+  <p><strong>Purpose:</strong> {{ signing_request.get_purpose_display }}</p>
+  <p><strong>Status:</strong> {{ signing_request.get_status_display }}</p>
+  <p><strong>Expires at:</strong> {{ signing_request.expires_at|date:"Y-m-d H:i:s" }}</p>
 </div>
 
 <div class="actions">
-    <a class="button" href="{% url 'signing-request-list' %}">Back to signing requests</a>
+  <a class="button secondary" href="{% url 'signing-request-detail' signing_request.id %}">Back to request</a>
 </div>
 {% endblock %}

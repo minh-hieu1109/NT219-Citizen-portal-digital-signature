@@ -75,7 +75,42 @@ class SigningRequest(models.Model):
         choices=SigningPurpose.choices,
         default=SigningPurpose.CITIZEN_LOCAL_SIGN,
     )
+    class PairingStatus(models.TextChoices):
+        NOT_STARTED = "not_started", "Not started"
+        WAITING_DEVICE = "waiting_device", "Waiting for device"
+        DEVICE_PAIRED = "device_paired", "Device paired"
+        CONFIRMED = "confirmed", "Confirmed"
+        CONSUMED = "consumed", "Consumed"
+        EXPIRED = "expired", "Expired"
+        FAILED = "failed", "Failed"
 
+    pairing_status = models.CharField(
+        max_length=30,
+        choices=PairingStatus.choices,
+        default=PairingStatus.NOT_STARTED,
+        db_index=True,
+    )
+
+    pairing_code_hash = models.CharField(
+        max_length=64,
+        blank=True,
+        db_index=True,
+    )
+
+    pairing_code_expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    pairing_attempts = models.PositiveIntegerField(default=0)
+
+    paired_at = models.DateTimeField(null=True, blank=True)
+    pairing_confirmed_at = models.DateTimeField(null=True, blank=True)
+
+    signer_device_name = models.CharField(max_length=120, blank=True)
+    signer_device_public_key_pem = models.TextField(blank=True)
+
+    signer_device_last_seen_at = models.DateTimeField(null=True, blank=True)
     request_document_hash = models.CharField(max_length=64, blank=True)
     request_nonce = models.CharField(max_length=128, blank=True)
     requester_ip = models.GenericIPAddressField(null=True, blank=True)

@@ -1,135 +1,195 @@
 ﻿{% extends 'base.html' %}
+{% block title %}Document #{{ document.id }} | Citizen Portal ML-DSA{% endblock %}
 
 {% block content %}
 <div class="page-header">
-    <h2>Document #{{ document.id }}</h2>
+  <h2>Document #{{ document.id }}</h2>
+  <p class="muted">{{ document.title }}</p>
 </div>
 
 <div class="card">
-    <p><strong>Title:</strong> {{ document.title }}</p>
+  <h3>Document information</h3>
 
-    {% if document.form_type == "citizen_generated_form" %}
-        {% if document.final_signed_pdf %}
-            <p>
-                <strong>Final signed PDF:</strong>
-                <a class="button small"
-                   href="{{ document.final_signed_pdf.url }}"
-                   target="_blank"
-                   rel="noopener"
-                   download>
-                    Download final signed PDF
-                </a>
-            </p>
+  <p><strong>Owner:</strong> {{ document.owner.email }}</p>
+  <p><strong>Status:</strong> {{ document.get_status_display }}</p>
+  <p><strong>Type:</strong> {{ document.form_type|default:"uploaded_document" }}</p>
+  <p><strong>Created:</strong> {{ document.uploaded_at|date:"Y-m-d H:i:s" }}</p>
 
-            <p>
-                <strong>Final signed PDF SHA-256:</strong>
-                <span class="mono">{{ document.final_signed_pdf_sha256|default:'-' }}</span>
-            </p>
-        {% else %}
-            <p>
-                <strong>Final signed PDF:</strong>
-                Not available yet. Citizen and officer must sign first.
-            </p>
-        {% endif %}
-    {% endif %}
+  <p>
+    <strong>Original PDF:</strong>
+    File gốc chỉ dùng trong quy trình ký, không hiển thị để tải trực tiếp.
+  </p>
+
+  <p>
+    <strong>Original SHA-256:</strong>
+    <span class="mono">{{ document.sha256_hash|default:"-" }}</span>
+  </p>
+
+  {% if document.final_signed_pdf %}
+    <p>
+      <strong>Final signed PDF:</strong>
+      <a class="button small" href="{% url 'download-signed-document' document.id 'final' %}">
+        Download final signed PDF
+      </a>
+    </p>
 
     <p>
-        <strong>
-            {% if document.form_type == "citizen_generated_form" %}
-                Generated form PDF:
-            {% else %}
-                Uploaded file:
-            {% endif %}
-        </strong>
+      <strong>Final signed PDF SHA-256:</strong>
+      <span class="mono">{{ document.final_signed_pdf_sha256|default:"-" }}</span>
+    </p>
 
-        {% if document.file %}
-            <a class="button small"
-               href="{{ document.file.url }}"
-               target="_blank"
-               rel="noopener"
-               download>
-                Download original PDF
+  {% elif document.current_signed_pdf %}
+    <p>
+      <strong>Citizen signed PDF:</strong>
+      <a class="button small" href="{% url 'download-signed-document' document.id 'citizen' %}">
+        Download citizen signed PDF
+      </a>
+    </p>
+
+    <p>
+      <strong>Citizen signed PDF SHA-256:</strong>
+      <span class="mono">{{ document.current_signed_pdf_sha256|default:"-" }}</span>
+    </p>
+
+  {% else %}
+    <p>
+      <strong>Download:</strong>
+      File chưa sẵn sàng tải về. Vui lòng chọn một cách ký tài liệu trước.
+    </p>
+  {% endif %}
+</div>
+
+{% if request.user == document.owner and not document.final_signed_pdf %}
+  <div class="card">
+    <h3>Chọn cách ký tài liệu</h3>
+
+    <p class="muted">
+      Bạn có thể tự ký bằng ứng dụng local nếu có private key ML-DSA,
+      hoặc gửi yêu cầu để officer/cơ quan ký số xác nhận.
+    </p>
+
+    <div class="signing-options">
+      <div class="signing-option-card">
+        <h4>Cách 1: Ký bằng ứng dụng local</h4>
+
+        <p>
+          Citizen tự ký tài liệu bằng private key ML-DSA nằm trên máy client.
+          Portal chỉ tạo phiên ký, verify chữ ký và nhúng chữ ký vào PDF.
+        </p>
+
+        {% if pending_client_sign_request %}
+          <p class="muted">
+            Đã có phiên ký local đang chờ:
+            <a href="{% url 'signing-request-detail' pending_client_sign_request.id %}">
+              Request #{{ pending_client_sign_request.id }}
             </a>
+          </p>
+        {% elif document.current_signed_pdf %}
+          <p class="muted">
+            Tài liệu đã có chữ ký local của citizen.
+          </p>
         {% else %}
-            -
+          <form method="post" action="{% url 'document-client-sign-request' document.id %}">
+            {% csrf_token %}
+            <button type="submit" class="button">
+              Ký bằng ứng dụng local
+            </button>
+          </form>
         {% endif %}
-    </p>
+      </div>
 
-    <p>
-        <strong>Original SHA-256:</strong>
-        <span class="mono">{{ document.sha256_hash|default:'-' }}</span>
-    </p>
+      <div class="signing-option-card">
+        <h4>Cách 2: Nhờ cơ quan/officer ký số</h4>
 
-    <p><strong>Owner:</strong> {{ document.owner.email }}</p>
-    <p><strong>Status:</strong> {{ document.get_status_display }}</p>
-    <p><strong>Created:</strong> {{ document.uploaded_at|date:'Y-m-d H:i:s' }}</p>
-</div>
+        <p>
+          Citizen không cần private key trong luồng này. Tài liệu sẽ được gửi cho
+          officer/cơ quan ký số xác nhận. Chữ ký cuối cùng là chữ ký của officer/cơ quan,
+          không phải chữ ký cá nhân của citizen.
+        </p>
+
+        {% if pending_authority_request %}
+          <p class="muted">
+            Đã có yêu cầu ký cơ quan đang chờ:
+            <a href="{% url 'signing-request-detail' pending_authority_request.id %}">
+              Request #{{ pending_authority_request.id }}
+            </a>
+          </p>
+
+          <p class="muted">
+            Officer phụ trách:
+            <strong>{{ pending_authority_request.signer.email }}</strong>
+          </p>
+        {% else %}
+          <form method="post" action="{% url 'document-submit-authority-signing' document.id %}">
+            {% csrf_token %}
+            <button type="submit" class="button secondary">
+              Gửi yêu cầu cơ quan ký số
+            </button>
+          </form>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+{% endif %}
 
 <div class="card">
-    <h3>Related Signatures</h3>
+  <h3>Signatures</h3>
 
-    {% if signature_records %}
-        <table class="table">
-            <thead>
-                <tr>
-                    <th>ID</th>
-                    <th>Request</th>
-                    <th>Signed At</th>
-                    <th>Algorithm</th>
-                    <th>Verify</th>
-                </tr>
-            </thead>
+  {% if signature_records %}
+    <table class="table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Request</th>
+          <th>Signer</th>
+          <th>Purpose</th>
+          <th>Algorithm</th>
+          <th>Signed at</th>
+          <th>Verify</th>
+        </tr>
+      </thead>
 
-            <tbody>
-                {% for sig in signature_records %}
-                    <tr>
-                        <td>{{ sig.id }}</td>
-                        <td>
-                            <a href="{% url 'signing-request-detail' sig.signing_request.id %}">
-                                #{{ sig.signing_request.id }}
-                            </a>
-                        </td>
-                        <td>{{ sig.signed_at|date:'Y-m-d H:i:s' }}</td>
-                        <td>{{ sig.algorithm }}</td>
-                        <td>
-                            <form method="post" action="{% url 'verify-signature' sig.id %}">
-                                {% csrf_token %}
-                                <button class="button small" type="submit">Verify</button>
-                            </form>
-                        </td>
-                    </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    {% else %}
-        <p>No signatures yet.</p>
-    {% endif %}
+      <tbody>
+        {% for sig in signature_records %}
+          <tr>
+            <td>#{{ sig.id }}</td>
+            <td>
+              <a href="{% url 'signing-request-detail' sig.signing_request.id %}">
+                #{{ sig.signing_request.id }}
+              </a>
+            </td>
+            <td>{{ sig.signing_request.signer.email }}</td>
+            <td>{{ sig.signing_request.get_purpose_display }}</td>
+            <td>{{ sig.algorithm }}</td>
+            <td>{{ sig.signed_at|date:"Y-m-d H:i:s" }}</td>
+            <td>
+              <form method="post" action="{% url 'verify-signature' sig.id %}">
+                {% csrf_token %}
+                <button class="button small" type="submit">Verify</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>No signatures yet.</p>
+  {% endif %}
 </div>
 
 <div class="actions">
-    <a class="button" href="{% url 'document-list' %}">Back</a>
+  <a class="button secondary" href="{% url 'document-list' %}">
+    Back to documents
+  </a>
 
-    <a class="button" href="{% url 'download-full-document-verification-package' document.id %}">
-        Download full verification package
+  {% if document.final_signed_pdf %}
+    <a class="button secondary" href="{% url 'download-full-document-verification-package' document.id %}">
+      Download verification package
     </a>
+
+    <a class="button secondary" href="{% url 'public-document-verify-qr' document.verification_id %}">
+      Public verify link
+    </a>
+  {% endif %}
 </div>
-{% if request.user == document.owner and document.status != "signed" %}
-  <div class="card mt-3">
-    <h3>Choose signing flow</h3>
-
-    <form method="post" action="{% url 'document-client-sign-request' document.pk %}" style="display:inline;">
-      {% csrf_token %}
-      <button type="submit" class="btn btn-primary">
-        Client Sign with Local ML-DSA Signer
-      </button>
-    </form>
-
-    <form method="post" action="{% url 'document-citizen-remote-sign-request' document.pk %}" style="display:inline;">
-        {% csrf_token %}
-        <button type="submit" class="btn btn-secondary">
-            Sign remotely via external TSP
-        </button>
-    </form>
-  </div>
-{% endif %}
 {% endblock %}

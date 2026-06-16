@@ -1,40 +1,47 @@
-﻿{% extends 'base.html' %}
+{% extends 'base.html' %}
+{% block title %}Documents | Citizen Portal ML-DSA{% endblock %}
 
 {% block content %}
 <div class="page-header">
-    <h2>Documents</h2>
+  <h2>Documents</h2>
+  <p class="muted">Open a document to start the signing flow or download signed PDFs.</p>
 </div>
 
 <div class="actions">
+  {% if user.role == "citizen" %}
     <a class="button" href="{% url 'document-upload' %}">Upload document</a>
+    <a class="button secondary" href="{% url 'create-generated-document' %}">Create form PDF</a>
+  {% endif %}
 </div>
 
 {% if documents %}
-<table class="table">
+  <table class="table">
     <thead>
-        <tr>
-            <th>ID</th>
-            <th>Title</th>
-            <th>Owner</th>
-            <th>Status</th>
-            <th>SHA-256</th>
-            <th>Created</th>
-        </tr>
+      <tr>
+        <th>ID</th>
+        <th>Title</th>
+        {% if user.role == "officer" or user.role == "admin" %}<th>Owner</th>{% endif %}
+        <th>Status</th>
+        <th>Original SHA-256</th>
+        <th>Created</th>
+      </tr>
     </thead>
     <tbody>
-        {% for document in documents %}
+      {% for document in documents %}
         <tr>
-            <td>{{ document.id }}</td>
-            <td><a href="{% url 'document-detail' document.id %}">{{ document.title }}</a></td>
-            <td>{{ document.owner.email }}</td>
-            <td>{{ document.get_status_display }}</td>
-            <td class="mono">{{ document.sha256_hash|default:'-' }}</td>
-            <td>{{ document.uploaded_at|date:'Y-m-d H:i' }}</td>
+          <td>#{{ document.id }}</td>
+          <td><a href="{% url 'document-detail' document.id %}">{{ document.title }}</a></td>
+          {% if user.role == "officer" or user.role == "admin" %}<td>{{ document.owner.email }}</td>{% endif %}
+          <td>{{ document.get_status_display }}</td>
+          <td class="mono">{{ document.sha256_hash|default:"-" }}</td>
+          <td>{{ document.uploaded_at|date:"Y-m-d H:i" }}</td>
         </tr>
-        {% endfor %}
+      {% endfor %}
     </tbody>
-</table>
+  </table>
 {% else %}
-<p>No documents available.</p>
+  <div class="card">
+    <p>No documents available.</p>
+  </div>
 {% endif %}
 {% endblock %}

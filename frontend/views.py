@@ -19,6 +19,8 @@ from verification.models import ValidationEvidence, VerificationResult
 from verification.services import verify_signature_record
 from .forms import CitizenRegistrationForm, DocumentUploadForm, SigningRequestForm, PublicVerifyUploadForm
 import base64
+import hashlib
+from datetime import timedelta
 import io
 import json
 import zipfile
@@ -26,6 +28,7 @@ from pathlib import Path
 import tempfile
 from signing.cms_services import create_cms_detached_signature
 from accounts.models import UserCertificate
+from signing.services import issue_client_pairing_session
 from django.conf import settings
 User = get_user_model()
 from verification.public_verify_services import verify_public_cms_detached, verify_public_raw_signature, verify_public_pades 
@@ -41,6 +44,11 @@ from documents.services import (
     calculate_uploaded_file_sha256,
     short_fingerprint,
 )
+from django.http import FileResponse
+from django.views import View
+from django.contrib.auth.mixins import LoginRequiredMixin
+
+from accounts.models import User
 class OfficerAdminRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
     raise_exception = True
 
@@ -53,6 +61,23 @@ def has_active_certificate(user):
         user=user,
         status=UserCertificate.Status.ACTIVE,
     ).exists()
+
+def get_client_ip(request):
+    forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    return request.META.get("REMOTE_ADDR", "")
+
+def get_available_authority_signer():
+    return (
+        User.objects
+        .filter(
+            role=User.Role.OFFICER,
+            is_verified_identity=True,
+            certificate_profile__status="active",
+        )
+        .first()
+    )
 
 def get_client_ip(request):
     forwarded = request.META.get("HTTP_X_FORWARDED_FOR")
@@ -169,6 +194,16 @@ class DocumentDetailView(LoginRequiredMixin, DetailView):
         context["verification_results"] = VerificationResult.objects.filter(
             signature_record__in=signatures
         ).select_related("signature_record")
+        context["pending_authority_request"] = (
+            SigningRequest.objects
+            .filter(
+                document=self.object,
+                purpose="officer_approval",
+                status=SigningRequest.Status.PENDING,
+            )
+            .select_related("signer")
+            .first()
+        )
         return context
 
 
@@ -260,11 +295,12 @@ class CreateClientSignRequestView(LoginRequiredMixin, View):
             signer=request.user,
             signing_type=SigningRequest.SigningType.CLIENT,
             status=SigningRequest.Status.PENDING,
-            purpose=SigningRequest.SigningPurpose.CITIZEN_LOCAL_SIGN,
+            purpose="citizen_local_sign",
         )
 
         attach_non_repudiation_evidence(signing_request, request)
-        issue_client_signing_token(signing_request)
+        pairing_code = issue_client_pairing_session(signing_request)
+        request.session[f"pairing_code_for_request_{signing_request.id}"] = pairing_code
 
         document.status = Document.Status.PENDING_SIGN
         document.save(update_fields=["status", "updated_at"])
@@ -425,8 +461,9 @@ class SigningRequestDetailView(LoginRequiredMixin, DetailView):
         context["is_expired"] = is_expired
         context["is_used"] = is_used
         context["is_officer_admin"] = self.request.user.role in {User.Role.OFFICER, User.Role.ADMIN}
-        context["client_signing_token"] = None
-        context["can_show_client_sign"] = False
+        context["pairing_code"] = None
+        context["can_show_pairing"] = False
+        context["can_confirm_pairing"] = False
 
         if (
             request_obj.signing_type == SigningRequest.SigningType.CLIENT
@@ -435,12 +472,15 @@ class SigningRequestDetailView(LoginRequiredMixin, DetailView):
             and not is_used
             and self.request.user == signer
         ):
-            if not request_obj.client_token:
-                issue_client_signing_token(request_obj)
-                request_obj.refresh_from_db()
+            session_key = f"pairing_code_for_request_{request_obj.id}"
 
-            context["client_signing_token"] = request_obj.client_token
-            context["can_show_client_sign"] = True
+            context["pairing_code"] = self.request.session.get(session_key)
+            context["can_show_pairing"] = bool(context["pairing_code"])
+
+            context["can_confirm_pairing"] = (
+                request_obj.pairing_status == SigningRequest.PairingStatus.DEVICE_PAIRED
+                and not request_obj.pairing_confirmed_at
+            )
         return context
 
 
@@ -1694,3 +1734,161 @@ class CreateCitizenRemoteSignRequestView(LoginRequiredMixin, View):
             "Citizen remote signing request created. Please confirm remote signing."
         )
         return redirect("signing-request-detail", pk=signing_request.pk)
+    
+class ConfirmClientPairingView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        signing_request = get_object_or_404(
+            SigningRequest.objects.select_related("document", "signer"),
+            pk=pk,
+            signing_type=SigningRequest.SigningType.CLIENT,
+            status=SigningRequest.Status.PENDING,
+        )
+
+        if request.user != signing_request.signer:
+            return HttpResponseForbidden("Only signer can confirm this pairing.")
+
+        if signing_request.used_at:
+            messages.error(request, "This signing request has already been used.")
+            return redirect("signing-request-detail", pk=pk)
+
+        now = timezone.now()
+
+        if signing_request.expires_at and now > signing_request.expires_at:
+            messages.error(request, "Signing request has expired.")
+            return redirect("signing-request-detail", pk=pk)
+
+        if (
+            signing_request.client_token_expires_at
+            and now > signing_request.client_token_expires_at
+        ):
+            messages.error(request, "Pairing session has expired.")
+            return redirect("signing-request-detail", pk=pk)
+
+        if signing_request.pairing_status != SigningRequest.PairingStatus.DEVICE_PAIRED:
+            messages.error(request, "No signer device is waiting for confirmation.")
+            return redirect("signing-request-detail", pk=pk)
+
+        signing_request.pairing_status = SigningRequest.PairingStatus.CONFIRMED
+        signing_request.pairing_confirmed_at = now
+        signing_request.save(update_fields=[
+            "pairing_status",
+            "pairing_confirmed_at",
+        ])
+
+        messages.success(request, "Signer device confirmed. Continue signing in the local signer app.")
+        return redirect("signing-request-detail", pk=pk)
+    
+class DownloadSignedDocumentView(LoginRequiredMixin, View):
+    def get(self, request, pk, kind):
+        document = get_object_or_404(Document, pk=pk)
+
+        is_owner = request.user == document.owner
+        is_officer_or_admin = request.user.role in {
+            User.Role.OFFICER,
+            User.Role.ADMIN,
+        }
+
+        if not is_owner and not is_officer_or_admin:
+            return HttpResponseForbidden("Not allowed.")
+
+        if kind == "final":
+            if not document.final_signed_pdf:
+                return HttpResponseForbidden("Final signed PDF is not available yet.")
+
+            return FileResponse(
+                document.final_signed_pdf.open("rb"),
+                as_attachment=True,
+                filename=f"final-signed-document-{document.id}.pdf",
+            )
+
+        if kind == "citizen":
+            if not document.current_signed_pdf:
+                return HttpResponseForbidden("Citizen signed PDF is not available yet.")
+
+            return FileResponse(
+                document.current_signed_pdf.open("rb"),
+                as_attachment=True,
+                filename=f"citizen-signed-document-{document.id}.pdf",
+            )
+
+        return HttpResponseForbidden("Invalid download type.")
+    
+class SubmitAuthoritySigningRequestView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        document = get_object_or_404(Document, pk=pk)
+
+        if request.user != document.owner:
+            return HttpResponseForbidden(
+                "Only document owner can submit this document for authority signing."
+            )
+
+        if document.final_signed_pdf:
+            messages.info(request, "This document already has a final signed PDF.")
+            return redirect("document-detail", pk=document.id)
+
+        existing_request = (
+            SigningRequest.objects
+            .filter(
+                document=document,
+                purpose="officer_approval",
+                status=SigningRequest.Status.PENDING,
+            )
+            .first()
+        )
+
+        if existing_request:
+            messages.info(
+                request,
+                f"This document already has a pending authority signing request assigned to {existing_request.signer.email}."
+            )
+            return redirect("signing-request-detail", pk=existing_request.id)
+
+        signer = get_available_authority_signer()
+
+        if not signer:
+            messages.error(
+                request,
+                "No available officer with verified identity and active certificate profile."
+            )
+            return redirect("document-detail", pk=document.id)
+
+        request_nonce = secrets.token_urlsafe(24)
+
+        consent_text = (
+            f"Citizen {request.user.email} submits document #{document.id} "
+            f"for authority/officer digital signing."
+        )
+
+        consent_hash = hashlib.sha256(
+            f"{document.sha256_hash}:{request_nonce}:{consent_text}".encode("utf-8")
+        ).hexdigest()
+
+        signing_request = SigningRequest.objects.create(
+            document=document,
+            requested_by=request.user,
+            signer=signer,
+
+            # Quan trọng:
+            # Citizen không ký. Officer/server mới là signer.
+            signing_type=SigningRequest.SigningType.REMOTE,
+            purpose="officer_approval",
+
+            status=SigningRequest.Status.PENDING,
+            expires_at=timezone.now() + timedelta(hours=24),
+
+            request_document_hash=document.sha256_hash,
+            request_nonce=request_nonce,
+            consent_text=consent_text,
+            consent_hash=consent_hash,
+            requester_ip=get_client_ip(request),
+            requester_user_agent=request.META.get("HTTP_USER_AGENT", ""),
+            auth_method="session_login",
+        )
+
+        messages.success(
+            request,
+            f"Document submitted for authority signing. "
+            f"Request #{signing_request.id} assigned to {signer.email}."
+        )
+
+        return redirect("signing-request-detail", pk=signing_request.id)

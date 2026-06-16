@@ -1,32 +1,38 @@
-﻿{% extends 'base.html' %}
+{% extends 'base.html' %}
+{% block title %}Audit Logs | Citizen Portal ML-DSA{% endblock %}
 
 {% block content %}
-<div class="page-header"><h2>Audit Logs</h2></div>
+<div class="page-header">
+  <h2>Audit Logs</h2>
+  <p class="muted">Latest audit events for identity, document, signing and verification actions.</p>
+</div>
 
 {% if audit_logs %}
-<table class="table">
+  <table class="table">
     <thead>
-        <tr>
-            <th>Time</th>
-            <th>User</th>
-            <th>Action</th>
-            <th>Object</th>
-            <th>Detail</th>
-        </tr>
+      <tr>
+        <th>Time</th>
+        <th>User</th>
+        <th>Action</th>
+        <th>Object</th>
+        <th>Detail</th>
+      </tr>
     </thead>
     <tbody>
-        {% for log in audit_logs %}
+      {% for log in audit_logs %}
         <tr>
-            <td>{{ log.created_at|date:'Y-m-d H:i:s' }}</td>
-            <td>{{ log.user.email|default:'-' }}</td>
-            <td>{{ log.action }}</td>
-            <td>{{ log.object_type }}#{{ log.object_id }}</td>
-            <td><pre class="json-pre">{{ log.detail }}</pre></td>
+          <td>{{ log.created_at|date:"Y-m-d H:i:s" }}</td>
+          <td>{{ log.user.email|default:"-" }}</td>
+          <td>{{ log.action }}</td>
+          <td>{{ log.object_type }} #{{ log.object_id }}</td>
+          <td><pre class="mono">{{ log.detail }}</pre></td>
         </tr>
-        {% endfor %}
+      {% endfor %}
     </tbody>
-</table>
+  </table>
 {% else %}
-<p>No audit logs available.</p>
+  <div class="card">
+    <p>No audit logs found.</p>
+  </div>
 {% endif %}
 {% endblock %}

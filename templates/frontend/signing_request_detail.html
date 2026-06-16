@@ -1,108 +1,200 @@
 ﻿{% extends 'base.html' %}
+{% block title %}Signing Request #{{ signing_request.id }} | Citizen Portal ML-DSA{% endblock %}
 
 {% block content %}
 <div class="page-header">
-    <h2>Signing Request #{{ signing_request.id }}</h2>
-</div>
-
-<div class="card">
-    <p><strong>Document:</strong> <a href="{% url 'document-detail' signing_request.document.id %}">{{ signing_request.document.title }}</a></p>
-    <p><strong>Requester:</strong> {{ signing_request.requested_by.email }}</p>
-    <p><strong>Signer:</strong> {{ signing_request.signer.email }}</p>
-    <p><strong>Type:</strong> {{ signing_request.get_signing_type_display }}</p>
-    <p><strong>Status:</strong> {{ signing_request.get_status_display }}</p>
-    <p><strong>Nonce:</strong> <span class="mono">{{ signing_request.nonce }}</span></p>
-    <p><strong>Expires At:</strong> {{ signing_request.expires_at|date:'Y-m-d H:i:s' }}</p>
-    <p><strong>Used At:</strong> {{ signing_request.used_at|date:'Y-m-d H:i:s'|default:'-' }}</p>
-    <p><strong>Strong Auth Verified:</strong> {{ signing_request.strong_auth_verified }}</p>
-</div>
-
-<div class="card">
-    <h3>Actions</h3>
-    {% if can_show_remote_sign %}
-        <form method="post" action="{% url 'remote-sign' signing_request.id %}">
-            {% csrf_token %}
-            <button class="button" type="submit">Remote Sign</button>
-        </form>
-    {% elif signing_request.signing_type == 'client' and signing_request.status == 'pending' %}
-        <a class="button" href="{% url 'client-sign-instructions' signing_request.id %}">Client Sign Instructions</a>
+  <h2>Signing Request #{{ signing_request.id }}</h2>
+  <p class="muted">
+    {% if signing_request.purpose == "citizen_local_sign" %}
+      Citizen local signing session.
+    {% elif signing_request.purpose == "citizen_remote_sign" %}
+      Citizen remote signing via external signer/TSP.
+    {% elif signing_request.purpose == "officer_approval" %}
+      Officer approval signing request.
     {% else %}
-        {% if signing_request.signing_type == 'remote' %}
-            {% if not signer_verified %}
-                <p>Signer identity is not verified yet.</p>
-            {% elif not signer_has_active_cert %}
-                <p>Signer has no certificate. Go to RA panel and issue a certificate first.</p>
-                {% if is_officer_admin %}
-                <p><a class="button small" href="{% url 'ra-pending' %}">Open RA panel</a></p>
-                {% endif %}
-            {% elif not is_pending %}
-                <p>Signing request is not pending.</p>
-            {% elif is_expired %}
-                <p>This signing request has expired.</p>
-            {% elif is_used %}
-                <p>Signing request has already been used.</p>
-            {% else %}
-                <p>No action available.</p>
-            {% endif %}
-        {% else %}
-            <p>No action available.</p>
-        {% endif %}
+      Signing workflow.
     {% endif %}
+  </p>
 </div>
 
 <div class="card">
-    <h3>Signature Record</h3>
-    {% if signing_request.signature_record %}
-        <p><strong>ID:</strong> {{ signing_request.signature_record.id }}</p>
-        <p><strong>Algorithm:</strong> {{ signing_request.signature_record.algorithm }}</p>
-        <p><strong>Signed Hash:</strong> <span class="mono">{{ signing_request.signature_record.signed_hash }}</span></p>
-        <p><strong>Signed At:</strong> {{ signing_request.signature_record.signed_at|date:'Y-m-d H:i:s' }}</p>
-        <form method="post" action="{% url 'verify-signature' signing_request.signature_record.id %}">
-            {% csrf_token %}
-            <button class="button small" type="submit">Run Verification</button>
-        </form>
-        <p>
-            <a
-                class="btn btn-secondary"
-                href="{% url 'download-verification-package' signing_request.signature_record.id %}"
-            >
-                Download Verification Package
-            </a>
-        </p>
-
-        <p>
-            <a href="{% url 'public-verify-upload' %}">
-                Open Public Verify Page
-            </a>
-        </p>
-    {% else %}
-        <p>Signature record is not available yet.</p>
-    {% endif %}
+  <h3>Request information</h3>
+  <p>
+    <strong>Document:</strong>
+    <a href="{% url 'document-detail' signing_request.document.id %}">
+      {{ signing_request.document.title }}
+    </a>
+  </p>
+  <p><strong>Requester:</strong> {{ signing_request.requested_by.email }}</p>
+  <p><strong>Signer:</strong> {{ signing_request.signer.email }}</p>
+  <p><strong>Type:</strong> {{ signing_request.get_signing_type_display }}</p>
+  <p><strong>Purpose:</strong> {{ signing_request.get_purpose_display }}</p>
+  <p><strong>Status:</strong> {{ signing_request.get_status_display }}</p>
+  <p><strong>Pairing status:</strong> {{ signing_request.get_pairing_status_display|default:"-" }}</p>
+  <p><strong>Expires at:</strong> {{ signing_request.expires_at|date:"Y-m-d H:i:s" }}</p>
+  <p><strong>Used at:</strong> {{ signing_request.used_at|date:"Y-m-d H:i:s"|default:"-" }}</p>
 </div>
-{% if can_show_client_sign and client_signing_token %}
-  <div class="card mt-3">
-    <h3>Client ML-DSA Signing Session</h3>
 
-    <p>Copy this short-lived token into the local signer app:</p>
+<div class="card">
+  <h3>Action</h3>
 
-    <pre>{{ client_signing_token }}</pre>
+  {% if can_show_pairing and pairing_code %}
+    <div class="action-panel">
+      <h4>Kết nối ứng dụng ký ML-DSA</h4>
 
-    <p>Run local signer:</p>
+      <p>
+        Nhập mã ghép nối này vào ứng dụng <strong>Local ML-DSA Signer</strong>.
+        Mã chỉ có hiệu lực trong thời gian ngắn và chỉ dùng cho phiên ký này.
+      </p>
 
-    <pre>python client-signer-local/client_signer_gui.py</pre>
-  </div>
-{% endif %}
-<h3>Non-repudiation Evidence</h3>
-<table>
-  <tr><th>Requested by</th><td>{{ signing_request.requested_by.email }}</td></tr>
-  <tr><th>Signer</th><td>{{ signing_request.signer.email }}</td></tr>
-  <tr><th>Signing type</th><td>{{ signing_request.signing_type }}</td></tr>
-  <tr><th>Purpose</th><td>{{ signing_request.purpose }}</td></tr>
-  <tr><th>Document hash at request</th><td>{{ signing_request.request_document_hash }}</td></tr>
-  <tr><th>Consent hash</th><td>{{ signing_request.consent_hash }}</td></tr>
-  <tr><th>Nonce</th><td>{{ signing_request.request_nonce }}</td></tr>
-  <tr><th>Auth method</th><td>{{ signing_request.auth_method }}</td></tr>
-  <tr><th>Requester IP</th><td>{{ signing_request.requester_ip }}</td></tr>
-</table>
-<div class="actions"><a class="button" href="{% url 'signing-request-list' %}">Back</a></div>
+      <div class="pairing-code">
+        {{ pairing_code }}
+      </div>
+
+      <p class="muted">
+        Private key vẫn nằm trên thiết bị của người ký, không gửi lên portal.
+      </p>
+
+      <p class="muted">
+        Sau khi ứng dụng ký kết nối, portal sẽ yêu cầu bạn xác nhận trước khi gửi dữ liệu cần ký.
+      </p>
+    </div>
+  {% endif %}
+
+  {% if can_confirm_pairing %}
+    <div class="action-panel">
+      <h4>Thiết bị đang yêu cầu ký</h4>
+
+      <p>
+        Ứng dụng
+        <strong>{{ signing_request.signer_device_name|default:"Local ML-DSA Signer" }}</strong>
+        đang yêu cầu ký tài liệu:
+        <strong>{{ signing_request.document.title }}</strong>
+      </p>
+
+      <p class="muted">
+        Hãy kiểm tra đúng tài liệu, đúng người ký và đúng thiết bị trước khi xác nhận.
+      </p>
+
+      <form method="post" action="{% url 'confirm-client-pairing' signing_request.id %}">
+        {% csrf_token %}
+        <button type="submit" class="button">Xác nhận phiên ký</button>
+      </form>
+    </div>
+  {% endif %}
+
+  {% if signing_request.pairing_status == "confirmed" %}
+    <div class="action-panel">
+      <h4>Phiên ký đã được xác nhận</h4>
+      <p>
+        Hãy quay lại ứng dụng <strong>Local ML-DSA Signer</strong> để tiếp tục ký tài liệu.
+      </p>
+      <p class="muted">
+        Ứng dụng ký sẽ lấy dữ liệu cần ký, ký bằng private key ở máy client, rồi gửi chữ ký về portal.
+      </p>
+    </div>
+  {% endif %}
+
+  {% if can_show_remote_sign %}
+    <div class="action-panel">
+      <h4>Officer remote signing</h4>
+
+      <p>
+        This request is assigned to you. Remote signing should call the configured external signer/TSP flow.
+      </p>
+
+      <form method="post" action="{% url 'remote-sign' signing_request.id %}">
+        {% csrf_token %}
+        <button class="button" type="submit">Remote Sign</button>
+      </form>
+    </div>
+  {% endif %}
+
+  {% if not can_show_pairing and not can_confirm_pairing and signing_request.pairing_status != "confirmed" and not can_show_remote_sign %}
+    {% if signing_request.status != "pending" %}
+      <p>No action available because this request is no longer pending.</p>
+    {% elif is_expired %}
+      <p>No action available because this request has expired.</p>
+    {% elif is_used %}
+      <p>No action available because this request has already been used.</p>
+    {% elif not signer_verified %}
+      <p>No action available because signer identity is not verified.</p>
+    {% elif not signer_has_active_cert %}
+      <p>No action available because signer certificate/public profile is not active.</p>
+    {% else %}
+      <p>No action available for your account.</p>
+    {% endif %}
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3>Signature record</h3>
+
+  {% if signing_request.signature_record %}
+    <p><strong>ID:</strong> #{{ signing_request.signature_record.id }}</p>
+    <p><strong>Algorithm:</strong> {{ signing_request.signature_record.algorithm }}</p>
+    <p>
+      <strong>Signed hash:</strong>
+      <span class="mono">{{ signing_request.signature_record.signed_hash }}</span>
+    </p>
+    <p>
+      <strong>Signed at:</strong>
+      {{ signing_request.signature_record.signed_at|date:"Y-m-d H:i:s" }}
+    </p>
+
+    <div class="actions">
+      <form method="post" action="{% url 'verify-signature' signing_request.signature_record.id %}" style="display:inline;">
+        {% csrf_token %}
+        <button class="button small" type="submit">Run verification</button>
+      </form>
+
+      <a class="button small secondary" href="{% url 'download-verification-package' signing_request.signature_record.id %}">
+        Download verification package
+      </a>
+
+      <a class="button small secondary" href="{% url 'public-verify-upload' %}">
+        Public verify
+      </a>
+    </div>
+  {% else %}
+    <p>Signature record is not available yet.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3>Non-repudiation evidence</h3>
+
+  <table class="table">
+    <tr>
+      <th>Document hash at request</th>
+      <td class="mono">{{ signing_request.request_document_hash|default:"-" }}</td>
+    </tr>
+    <tr>
+      <th>Consent hash</th>
+      <td class="mono">{{ signing_request.consent_hash|default:"-" }}</td>
+    </tr>
+    <tr>
+      <th>Request nonce</th>
+      <td class="mono">{{ signing_request.request_nonce|default:"-" }}</td>
+    </tr>
+    <tr>
+      <th>Session nonce</th>
+      <td class="mono">{{ signing_request.nonce }}</td>
+    </tr>
+    <tr>
+      <th>Auth method</th>
+      <td>{{ signing_request.auth_method }}</td>
+    </tr>
+    <tr>
+      <th>Requester IP</th>
+      <td>{{ signing_request.requester_ip|default:"-" }}</td>
+    </tr>
+  </table>
+</div>
+
+<div class="actions">
+  <a class="button secondary" href="{% url 'signing-request-list' %}">
+    Back to signing requests
+  </a>
+</div>
 {% endblock %}

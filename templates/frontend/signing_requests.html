@@ -1,48 +1,55 @@
-﻿{% extends 'base.html' %}
+{% extends 'base.html' %}
+{% block title %}Signing Requests | Citizen Portal ML-DSA{% endblock %}
 
 {% block content %}
 <div class="page-header">
-    <h2>Signing Requests</h2>
+  <h2>Signing Requests</h2>
+  <p class="muted">
+    Normal citizen flow starts from a document detail page. This page is for tracking pending and completed signing tasks.
+  </p>
 </div>
 
-<div class="actions">
-    <a class="button" href="{% url 'signing-request-create' %}">Create signing request</a>
-</div>
+{% if user.role == "citizen" %}
+  <div class="actions">
+    <a class="button" href="{% url 'document-list' %}">Open documents to sign</a>
+    <a class="button secondary" href="{% url 'document-upload' %}">Upload document</a>
+  </div>
+{% endif %}
 
 {% if signing_requests %}
-<table class="table">
+  <table class="table">
     <thead>
-        <tr>
-            <th>ID</th>
-            <th>Document</th>
-            <th>Requester</th>
-            <th>Signer</th>
-            <th>Type</th>
-            <th>Status</th>
-            <th>Nonce</th>
-            <th>Expires</th>
-            <th>Used At</th>
-            <th>Strong Auth</th>
-        </tr>
+      <tr>
+        <th>ID</th>
+        <th>Document</th>
+        <th>Requester</th>
+        <th>Signer</th>
+        <th>Type</th>
+        <th>Purpose</th>
+        <th>Status</th>
+        <th>Expires</th>
+        <th>Used</th>
+      </tr>
     </thead>
     <tbody>
-        {% for request in signing_requests %}
+      {% for request in signing_requests %}
         <tr>
-            <td><a href="{% url 'signing-request-detail' request.id %}">#{{ request.id }}</a></td>
-            <td>{{ request.document.title }}</td>
-            <td>{{ request.requested_by.email }}</td>
-            <td>{{ request.signer.email }}</td>
-            <td>{{ request.get_signing_type_display }}</td>
-            <td>{{ request.get_status_display }}</td>
-            <td class="mono">{{ request.nonce }}</td>
-            <td>{{ request.expires_at|date:'Y-m-d H:i:s' }}</td>
-            <td>{{ request.used_at|date:'Y-m-d H:i:s'|default:'-' }}</td>
-            <td>{{ request.strong_auth_verified }}</td>
+          <td><a href="{% url 'signing-request-detail' request.id %}">#{{ request.id }}</a></td>
+          <td>{{ request.document.title }}</td>
+          <td>{{ request.requested_by.email }}</td>
+          <td>{{ request.signer.email }}</td>
+          <td>{{ request.get_signing_type_display }}</td>
+          <td>{{ request.get_purpose_display }}</td>
+          <td>{{ request.get_status_display }}</td>
+          <td>{{ request.expires_at|date:"Y-m-d H:i:s" }}</td>
+          <td>{% if request.used_at %}Yes{% else %}No{% endif %}</td>
         </tr>
-        {% endfor %}
+      {% endfor %}
     </tbody>
-</table>
+  </table>
 {% else %}
-<p>No signing requests found.</p>
+  <div class="card">
+    <p>No signing requests found.</p>
+  </div>
 {% endif %}
 {% endblock %}

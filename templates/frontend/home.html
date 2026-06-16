@@ -1,50 +1,80 @@
-﻿{% extends 'base.html' %}
+{% extends 'base.html' %}
+{% block title %}Dashboard | Citizen Portal ML-DSA{% endblock %}
 
 {% block content %}
 <div class="page-header">
-    <h2>Demo Dashboard</h2>
+  <h2>Dashboard</h2>
+  {% if user.is_authenticated %}
+    <p class="muted">Logged in as <strong>{{ user.email }}</strong> · role: <strong>{{ user.role }}</strong></p>
+  {% endif %}
 </div>
 
 {% if user.is_authenticated %}
-<div class="card">
-    <p><strong>User:</strong> {{ user.email }}</p>
-    <p><strong>Role:</strong> {{ user.role }}</p>
-</div>
-
-<div class="grid">
+  <div class="grid">
     <div class="card summary-card"><h3>Documents</h3><p>{{ counts.documents }}</p></div>
-    <div class="card summary-card"><h3>Signing Requests</h3><p>{{ counts.signing_requests }}</p></div>
+    <div class="card summary-card"><h3>Signing requests</h3><p>{{ counts.signing_requests }}</p></div>
     <div class="card summary-card"><h3>Signatures</h3><p>{{ counts.signatures }}</p></div>
-    <div class="card summary-card"><h3>Verification</h3><p>{{ counts.verification_results }}</p></div>
-    <div class="card summary-card"><h3>LTV Evidence</h3><p>{{ counts.validation_evidence }}</p></div>
-    <div class="card summary-card"><h3>Audit Logs</h3><p>{{ counts.audit_logs }}</p></div>
-</div>
+    <div class="card summary-card"><h3>Verification results</h3><p>{{ counts.verification_results }}</p></div>
+    <div class="card summary-card"><h3>LTV evidence</h3><p>{{ counts.validation_evidence }}</p></div>
+    <div class="card summary-card"><h3>Audit logs</h3><p>{{ counts.audit_logs }}</p></div>
+  </div>
 
-<div class="card">
-    <h3>Quick Links</h3>
-    <div class="link-list">
-        <a href="{% url 'document-list' %}">Documents</a>
-        <a href="{% url 'document-upload' %}">Upload document</a>
-        <a href="{% url 'signing-request-list' %}">Signing requests</a>
-        <a href="{% url 'signing-request-create' %}">Create signing request</a>
-        <a href="{% url 'verification-result-list' %}">Verification results</a>
-        {% if is_officer_admin %}
-            <a href="{% url 'ra-pending' %}">RA panel (pending: {{ pending_identity_count|default:0 }})</a>
-            <a href="{% url 'audit-log-list' %}">Audit logs</a>
-        {% endif %}
-        <a href="/admin/">Admin site</a>
-    </div>
-    <p class="muted">Docs: <code>README_DEMO.md</code> and <code>docs/demo_checklist.md</code></p>
-</div>
-{% else %}
-<div class="card">
-    <p>You are not logged in. Please <a href="{% url 'login' %}">login</a> to use the dashboard.</p>
-    {% if not user_exists %}
-        <p>No users found yet. Run:</p>
-        <pre>docker compose exec web python manage.py create_demo_users
-
-docker compose exec web python manage.py createsuperuser</pre>
+  <div class="card">
+    <h3>Main workflow</h3>
+    {% if user.role == "citizen" %}
+      <ol>
+        <li>Upload or generate a PDF document.</li>
+        <li>Open the document detail page.</li>
+        <li>Choose <strong>Client Sign with Local ML-DSA Signer</strong>.</li>
+        <li>Copy the short-lived token into the local signer app.</li>
+        <li>The local signer signs with the citizen private key; the portal only verifies and embeds the signature.</li>
+      </ol>
+      <div class="actions">
+        <a class="button" href="{% url 'document-upload' %}">Upload document</a>
+        <a class="button secondary" href="{% url 'create-generated-document' %}">Create form PDF</a>
+        <a class="button secondary" href="{% url 'document-list' %}">My documents</a>
+      </div>
+    {% elif user.role == "officer" or user.role == "admin" %}
+      <ol>
+        <li>Verify citizen identity in the RA panel.</li>
+        <li>Review assigned officer approval signing requests.</li>
+        <li>Remote sign only the request assigned to your account.</li>
+        <li>Run verification and inspect audit logs when needed.</li>
+      </ol>
+      <div class="actions">
+        <a class="button" href="{% url 'signing-request-list' %}">Assigned signing requests</a>
+        <a class="button secondary" href="{% url 'ra-pending' %}">RA panel{% if pending_identity_count %} ({{ pending_identity_count }}){% endif %}</a>
+        <a class="button secondary" href="{% url 'audit-log-list' %}">Audit logs</a>
+      </div>
+    {% else %}
+      <p>Use the navigation bar to access your allowed actions.</p>
     {% endif %}
-</div>
+  </div>
+
+  <div class="card">
+    <h3>Security note</h3>
+    <p>
+      The portal server does not need the citizen private key. Client-side signing uses a short-lived token only to identify the signing session.
+      The final signature is accepted only after ML-DSA verification with the signer certificate.
+    </p>
+  </div>
+{% else %}
+  <div class="card">
+    <h3>Public access</h3>
+    <p>You can verify a signed PDF without logging in.</p>
+    <div class="actions">
+      <a class="button" href="{% url 'public-verify-upload' %}">Public verify</a>
+      <a class="button secondary" href="{% url 'login' %}">Login</a>
+      <a class="button secondary" href="{% url 'register' %}">Register</a>
+    </div>
+  </div>
+
+  {% if not user_exists %}
+    <div class="card">
+      <h3>No users found</h3>
+      <pre>docker compose exec web python manage.py create_demo_users
+docker compose exec web python manage.py createsuperuser</pre>
+    </div>
+  {% endif %}
 {% endif %}
 {% endblock %}

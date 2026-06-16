@@ -1,29 +1,38 @@
 {% extends 'base.html' %}
+{% block title %}Upload Document | Citizen Portal ML-DSA{% endblock %}
 
 {% block content %}
 <div class="page-header">
-    <h2>Upload Document</h2>
-    <p>Add a new document to the portal for signing.</p>
+  <h2>Upload document</h2>
+  <p class="muted">Upload a PDF, then open the document detail page to start client-side ML-DSA signing.</p>
 </div>
 
 <div class="card">
-    <form method="post" enctype="multipart/form-data">
-        {% csrf_token %}
-        <div class="form-group">
-            {{ form.title.label_tag }}
-            {{ form.title }}
-            {% if form.title.errors %}
-                <div class="field-error">{{ form.title.errors.0 }}</div>
-            {% endif %}
-        </div>
-        <div class="form-group">
-            {{ form.file.label_tag }}
-            {{ form.file }}
-            {% if form.file.errors %}
-                <div class="field-error">{{ form.file.errors.0 }}</div>
-            {% endif %}
-        </div>
-        <button type="submit" class="button">Upload document</button>
-    </form>
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+
+    {% if form.non_field_errors %}
+      <div class="message error">
+        {% for error in form.non_field_errors %}
+          <div>{{ error }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    <div class="form-group">
+      {{ form.title.label_tag }}
+      {{ form.title }}
+      {% if form.title.errors %}<div class="field-error">{{ form.title.errors.0 }}</div>{% endif %}
+    </div>
+
+    <div class="form-group">
+      {{ form.file.label_tag }}
+      {{ form.file }}
+      {% if form.file.errors %}<div class="field-error">{{ form.file.errors.0 }}</div>{% endif %}
+    </div>
+
+    <button type="submit" class="button">Upload</button>
+    <a class="button secondary" href="{% url 'document-list' %}">Cancel</a>
+  </form>
 </div>
 {% endblock %}

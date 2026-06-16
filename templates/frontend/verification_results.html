@@ -1,46 +1,42 @@
-﻿{% extends 'base.html' %}
+{% extends 'base.html' %}
+{% block title %}Verification Results | Citizen Portal ML-DSA{% endblock %}
 
 {% block content %}
-<div class="page-header"><h2>Verification Results</h2></div>
+<div class="page-header">
+  <h2>Verification Results</h2>
+  <p class="muted">Results generated from internal signature verification.</p>
+</div>
 
 {% if verification_results %}
-<table class="table">
+  <table class="table">
     <thead>
-        <tr>
-            <th>ID</th>
-            <th>Signature</th>
-            <th>Status</th>
-            <th>Hash Match</th>
-            <th>Signature Valid</th>
-            <th>OCSP</th>
-            <th>Timestamp</th>
-            <th>LTV</th>
-            <th>Verified At</th>
-        </tr>
+      <tr>
+        <th>ID</th>
+        <th>Signature</th>
+        <th>Document</th>
+        <th>Status</th>
+        <th>Signature valid</th>
+        <th>Hash match</th>
+        <th>Verified at</th>
+      </tr>
     </thead>
     <tbody>
-        {% for item in verification_results %}
+      {% for result in verification_results %}
         <tr>
-            <td>{{ item.id }}</td>
-            <td>#{{ item.signature_record.id }}</td>
-            <td>{{ item.status }}</td>
-            <td>{{ item.is_hash_match }}</td>
-            <td>{{ item.is_signature_valid }}</td>
-            <td>{{ item.detail.ocsp_status|default:'-' }}</td>
-            <td>{{ item.detail.timestamp_status|default:'-' }}</td>
-            <td>
-                exists={{ item.detail.ltv.evidence_exists|default:'-' }},
-                hash={{ item.detail.ltv.evidence_hash_valid|default:'-' }},
-                ts={{ item.detail.ltv.has_timestamp|default:'-' }},
-                cert={{ item.detail.ltv.has_certificate|default:'-' }},
-                ocsp/crl={{ item.detail.ltv.has_ocsp_or_crl|default:'-' }}
-            </td>
-            <td>{{ item.verified_at|date:'Y-m-d H:i:s' }}</td>
+          <td>#{{ result.id }}</td>
+          <td>#{{ result.signature_record.id }}</td>
+          <td>{{ result.signature_record.signing_request.document.title }}</td>
+          <td>{{ result.status }}</td>
+          <td>{{ result.is_signature_valid }}</td>
+          <td>{{ result.is_hash_match }}</td>
+          <td>{{ result.verified_at|date:"Y-m-d H:i:s" }}</td>
         </tr>
-        {% endfor %}
+      {% endfor %}
     </tbody>
-</table>
+  </table>
 {% else %}
-<p>No verification results yet.</p>
+  <div class="card">
+    <p>No verification results yet.</p>
+  </div>
 {% endif %}
 {% endblock %}

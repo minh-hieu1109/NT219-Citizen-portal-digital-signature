@@ -1,178 +1,40 @@
-{% extends "base.html" %}
+{% extends 'base.html' %}
+{% block title %}Official Document Verification | Citizen Portal ML-DSA{% endblock %}
 
 {% block content %}
-
-<h2>Official Document Verification</h2>
-
-<div style="padding:12px; border:1px solid #0a0; background:#eaffea;">
-  <strong>Verification record found.</strong>
-  This page shows the official document information stored on the server.
+<div class="page-header">
+  <h2>Official document verification</h2>
+  <p class="muted">Compare an uploaded document with the official final signed PDF hash.</p>
 </div>
 
-<h3>Official document information</h3>
+{% if document %}
+  <div class="card">
+    <h3>{{ document.title }}</h3>
+    <p><strong>Owner:</strong> {{ document.owner.email }}</p>
+    <p><strong>Status:</strong> {{ document.get_status_display }}</p>
+    <p><strong>Official hash:</strong> <span class="mono">{{ official_hash|default:document.final_signed_pdf_sha256|default:"-" }}</span></p>
 
-<table border="1" cellpadding="8" cellspacing="0">
-  <tr>
-    <th>Title</th>
-    <td>{{ document.title }}</td>
-  </tr>
-  <tr>
-    <th>Owner</th>
-    <td>{{ document.owner.full_name|default:document.owner.email }}</td>
-  </tr>
-  <tr>
-    <th>Email</th>
-    <td>{{ document.owner.email }}</td>
-  </tr>
-  <tr>
-    <th>Citizen ID</th>
-    <td>{{ document.owner.citizen_id|default:"-" }}</td>
-  </tr>
-  <tr>
-    <th>Form type</th>
-    <td>{{ document.form_type }}</td>
-  </tr>
-  <tr>
-    <th>Verification ID</th>
-    <td><code>{{ verification_id }}</code></td>
-  </tr>
+    {% if document.final_signed_pdf %}
+      <a class="button small" href="{{ document.final_signed_pdf.url }}" target="_blank" rel="noopener" download>Download official final signed PDF</a>
+    {% endif %}
+  </div>
+{% endif %}
 
-  {% if is_generated_form %}
-    <tr>
-      <th>Official final PDF SHA-256</th>
-      <td><code>{{ official_hash }}</code></td>
-    </tr>
-    <tr>
-      <th>Fingerprint</th>
-      <td><strong>{{ fingerprint }}</strong></td>
-    </tr>
-  {% endif %}
-</table>
+{% if compare_result %}
+  <div class="card">
+    <h3>Comparison result</h3>
+    <pre class="mono">{{ compare_result }}</pre>
+  </div>
+{% endif %}
 
-<h3>Signature information</h3>
-
-<table border="1" cellpadding="8" cellspacing="0">
-  <tr>
-    <th>Citizen signature</th>
-    <td>
-      {% if citizen_signature %}
-        Signed by {{ citizen_signature.signing_request.signer.email }}
-        at {{ citizen_signature.signed_at|date:"Y-m-d H:i:s" }}
-      {% else %}
-        Not found
-      {% endif %}
-    </td>
-  </tr>
-  <tr>
-    <th>Officer approval signature</th>
-    <td>
-      {% if officer_signature %}
-        Signed by {{ officer_signature.signing_request.signer.email }}
-        at {{ officer_signature.signed_at|date:"Y-m-d H:i:s" }}
-      {% else %}
-        Not found
-      {% endif %}
-    </td>
-  </tr>
-</table>
-
-<h3>Anti-forgery warning</h3>
-
-<div style="padding: 12px; border: 1px solid #c00; background: #ffecec;">
-  <strong>Do not trust the QR code alone.</strong>
-  The QR code only opens the official verification record.
-  A generated form is trustworthy only if its visible content, Verification ID,
-  signer, signing time, and fingerprint match this page.
-</div>
-
-{% if is_generated_form %}
-  <h3>Upload generated form PDF to compare</h3>
-
-  {% if has_final_pdf %}
-    <p>
-      Upload the final signed generated-form PDF. The system will calculate
-      its SHA-256 hash and compare it with the official final signed PDF.
-    </p>
-
+{% if form %}
+  <div class="card">
+    <h3>Upload file to compare</h3>
     <form method="post" enctype="multipart/form-data">
       {% csrf_token %}
-      <input type="file" name="uploaded_pdf" accept="application/pdf" required>
-      <button type="submit">Compare PDF</button>
+      {{ form.as_p }}
+      <button class="button" type="submit">Compare</button>
     </form>
-  {% else %}
-    <p>
-      The final signed PDF is not available yet. Please complete citizen and officer signing first.
-    </p>
-  {% endif %}
-
-  {% if compare_result %}
-    <h3>Comparison result</h3>
-
-    {% if compare_result.hash_match %}
-      <div style="padding: 12px; border: 1px solid #0a0; background: #eaffea;">
-        <strong>MATCH.</strong> {{ compare_result.message }}
-      </div>
-    {% else %}
-      <div style="padding: 12px; border: 1px solid #c00; background: #ffecec;">
-        <strong>MISMATCH.</strong> {{ compare_result.message }}
-      </div>
-    {% endif %}
-
-    <table border="1" cellpadding="8" cellspacing="0">
-      <tr>
-        <th>Official fingerprint</th>
-        <td>{{ compare_result.official_fingerprint }}</td>
-      </tr>
-      <tr>
-        <th>Uploaded fingerprint</th>
-        <td>{{ compare_result.uploaded_fingerprint }}</td>
-      </tr>
-      <tr>
-        <th>Official SHA-256</th>
-        <td><code>{{ compare_result.official_hash }}</code></td>
-      </tr>
-      <tr>
-        <th>Uploaded SHA-256</th>
-        <td><code>{{ compare_result.uploaded_hash }}</code></td>
-      </tr>
-    </table>
-  {% endif %}
-{% endif %}
-
-<h3>Anti-forgery warning</h3>
-
-<div style="padding:12px; border:1px solid #c00; background:#ffecec;">
-  <strong>Do not trust the QR code alone.</strong>
-  The QR code only opens the official verification record.
-  The document is trustworthy only if the visible content, owner, Verification ID,
-  signer, signing time, and fingerprint match this page.
-</div>
-<h3>Document</h3>
-<p>Title: {{ document.title }}</p>
-<p>Owner: {{ document.owner.email }}</p>
-<p>Verification ID: {{ verification_id }}</p>
-<p>Official hash: {{ official_hash }}</p>
-<p>Fingerprint: {{ fingerprint }}</p>
-
-<h3>Citizen Signature</h3>
-{% if citizen_signature %}
-  <p>Signer: {{ citizen_signature.signing_request.signer.email }}</p>
-  <p>Algorithm: {{ citizen_signature.algorithm }}</p>
-  <p>Certificate serial: {{ citizen_signature.certificate_serial }}</p>
-  <p>Signed at: {{ citizen_signature.signed_at }}</p>
-  <p>Timestamp: {{ citizen_signature.timestamp_status }}</p>
-{% else %}
-  <p>No citizen signature.</p>
-{% endif %}
-
-<h3>Officer Signature</h3>
-{% if officer_signature %}
-  <p>Signer: {{ officer_signature.signing_request.signer.email }}</p>
-  <p>Algorithm: {{ officer_signature.algorithm }}</p>
-  <p>Certificate serial: {{ officer_signature.certificate_serial }}</p>
-  <p>Signed at: {{ officer_signature.signed_at }}</p>
-  <p>Timestamp: {{ officer_signature.timestamp_status }}</p>
-{% else %}
-  <p>No officer signature.</p>
+  </div>
 {% endif %}
 {% endblock %}

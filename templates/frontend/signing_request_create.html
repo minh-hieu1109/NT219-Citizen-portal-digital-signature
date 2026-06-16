@@ -1,51 +1,58 @@
 {% extends 'base.html' %}
+{% block title %}Advanced Signing Request | Citizen Portal ML-DSA{% endblock %}
 
 {% block content %}
 <div class="page-header">
-    <h2>Create Signing Request</h2>
-    <p>Select a document and signing type.</p>
+  <h2>Advanced signing request</h2>
+  <p class="muted">
+    The recommended flow is to open a document and use the dedicated client-sign button.
+    This form is kept only for manual testing and administrative debugging.
+  </p>
 </div>
 
 <div class="card">
-    {% if eligible_signer_count == 0 %}
+  <p>
+    To avoid mixing the real workflow, use this page only when you intentionally need to select the document,
+    signer and signing type by hand.
+  </p>
+
+  {% if eligible_signer_count == 0 %}
     <div class="message error">
-        No eligible signer found. Please verify identity and issue certificate in RA panel first.
-        {% if is_officer_admin %}
-        <a href="{% url 'ra-pending' %}">Go to RA panel</a>
-        {% endif %}
+      No eligible signer found. The signer must be identity-verified and must have an active public certificate/profile.
     </div>
-    {% endif %}
-    <form method="post">
-        {% csrf_token %}
-        <div class="form-group">
-            {{ form.document.label_tag }}
-            {{ form.document }}
-            {% if form.document.errors %}
-                <div class="field-error">{{ form.document.errors.0 }}</div>
-            {% endif %}
-        </div>
-        <div class="form-group">
-            {{ form.signing_type.label_tag }}
-            {{ form.signing_type }}
-            {% if form.signing_type.errors %}
-                <div class="field-error">{{ form.signing_type.errors.0 }}</div>
-            {% endif %}
-        </div>
-        <div class="form-group">
-            {{ form.signer.label_tag }}
-            {{ form.signer }}
-            {% if form.signer.errors %}
-                <div class="field-error">{{ form.signer.errors.0 }}</div>
-            {% endif %}
-        </div>
-        <button type="submit" class="button" {% if eligible_signer_count == 0 %}disabled{% endif %}>Create signing request</button>
-    </form>
+  {% endif %}
+
+  <form method="post">
+    {% csrf_token %}
+
     {% if form.non_field_errors %}
-    <div class="alert alert-danger">
+      <div class="message error">
         {% for error in form.non_field_errors %}
-        <div>{{ error }}</div>
+          <div>{{ error }}</div>
         {% endfor %}
-    </div>
+      </div>
     {% endif %}
+
+    <div class="form-group">
+      {{ form.document.label_tag }}
+      {{ form.document }}
+      {% if form.document.errors %}<div class="field-error">{{ form.document.errors.0 }}</div>{% endif %}
+    </div>
+
+    <div class="form-group">
+      {{ form.signing_type.label_tag }}
+      {{ form.signing_type }}
+      {% if form.signing_type.errors %}<div class="field-error">{{ form.signing_type.errors.0 }}</div>{% endif %}
+    </div>
+
+    <div class="form-group">
+      {{ form.signer.label_tag }}
+      {{ form.signer }}
+      {% if form.signer.errors %}<div class="field-error">{{ form.signer.errors.0 }}</div>{% endif %}
+    </div>
+
+    <button type="submit" class="button" {% if eligible_signer_count == 0 %}disabled{% endif %}>Create manual request</button>
+    <a class="button secondary" href="{% url 'document-list' %}">Use normal document flow</a>
+  </form>
 </div>
 {% endblock %}

@@ -1,93 +1,33 @@
 {% extends 'base.html' %}
+{% block title %}Public Verification Result | Citizen Portal ML-DSA{% endblock %}
 
 {% block content %}
-<h2>Public Verification Result</h2>
+<div class="page-header">
+  <h2>Public verification result</h2>
+</div>
 
-{% if result.ok %}
-    <div class="alert alert-success">
-        <strong>VALID</strong>
-    </div>
-{% else %}
-    <div class="alert alert-danger">
-        <strong>INVALID / ERROR</strong>
-    </div>
-{% endif %}
+<div class="card">
+  {% if result %}
+    <table class="table">
+      {% for key, value in result.items %}
+        <tr>
+          <th>{{ key }}</th>
+          <td>
+            {% if value.items %}
+              <pre class="mono">{{ value }}</pre>
+            {% else %}
+              {{ value }}
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </table>
+  {% else %}
+    <p>No result returned.</p>
+  {% endif %}
+</div>
 
-<table class="table">
-    <tr>
-        <th>Mode</th>
-        <td>{{ result.mode }}</td>
-    </tr>
-
-    <tr>
-        <th>Status</th>
-        <td>{{ result.status }}</td>
-    </tr>
-
-    <tr>
-        <th>Message</th>
-        <td>{{ result.message|default:"-" }}</td>
-    </tr>
-
-    <tr>
-        <th>Signature valid</th>
-        <td>{{ result.signature_valid|yesno:"True,False,-" }}</td>
-    </tr>
-
-    <tr>
-        <th>Certificate subject</th>
-        <td>{{ result.certificate_subject|default:"-" }}</td>
-    </tr>
-
-    <tr>
-        <th>Certificate issuer</th>
-        <td>{{ result.certificate_issuer|default:"-" }}</td>
-    </tr>
-
-    <tr>
-        <th>Certificate serial</th>
-        <td>{{ result.certificate_serial|default:"-" }}</td>
-    </tr>
-
-    <tr>
-        <th>Certificate time valid</th>
-        <td>{{ result.certificate_time_valid|yesno:"True,False,-" }}</td>
-    </tr>
-
-    <tr>
-        <th>Trusted by lab CA</th>
-        <td>{{ result.certificate_trusted_by_lab_ca|yesno:"True,False,-" }}</td>
-    </tr>
-
-    <tr>
-        <th>Revoked by CRL</th>
-        <td>{{ result.certificate_revoked_crl|yesno:"True,False,-" }}</td>
-    </tr>
-
-    <tr>
-        <th>OCSP status</th>
-        <td>{{ result.ocsp_status|default:"-" }}</td>
-    </tr>
-
-    <tr>
-        <th>Warning</th>
-        <td>{{ result.warning|default:"-" }}</td>
-    </tr>
-
-    <tr>
-        <th>PAdES details</th>
-        <td>
-            <pre>{{ result.pades_details|default:"-" }}</pre>
-        </td>
-    </tr>
-</table>
-
-<h3>Raw detail</h3>
-<pre>{{ result }}</pre>
-
-<p>
-    <a class="button small" href="{% url 'public-verify-upload' %}">
-        Verify another file
-    </a>
-</p>
+<div class="actions">
+  <a class="button secondary" href="{% url 'public-verify-upload' %}">Verify another file</a>
+</div>
 {% endblock %}
